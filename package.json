@@ -30,13 +30,13 @@
     "check:write": "biome check --write .",
     "format": "biome format --write .",
     "invariants": "node scripts/check-invariants.mjs",
-    "lint": "biome lint .",
+    "lint": "eslint .",
     "pack:verify": "npm run build && npm pack --dry-run --ignore-scripts",
     "prepare": "lefthook install",
     "prepack": "npm run build",
     "test": "playwright test",
     "typecheck": "tsc --noEmit -p tsconfig.build.json && tsc --noEmit -p tsconfig.test.json && tsc --noEmit -p tsconfig.json",
-    "verify": "npm run check && npm run typecheck && npm run invariants && npm test && npm run pack:verify"
+    "verify": "npm run check && npm run lint && npm run typecheck && npm run invariants && npm test && npm run pack:verify"
   },
   "keywords": [
     "playwright",
@@ -56,7 +56,11 @@
     "@biomejs/biome": "2.4.14",
     "@playwright/test": "^1.59.0",
     "@types/node": "^24.12.3",
+    "eslint": "^10.3.0",
+    "eslint-import-resolver-typescript": "^4.4.4",
+    "eslint-plugin-import-x": "^4.16.2",
     "lefthook": "2.1.6",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.59.2"
   }
 }
