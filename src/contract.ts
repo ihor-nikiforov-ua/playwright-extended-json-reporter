@@ -62,8 +62,8 @@ export interface RunboardTestStep {
 
 export type RunboardErrorEvidenceSource = 'test-error' | 'status-derived';
 
-export interface RunboardErrorEvidence {
-  source: RunboardErrorEvidenceSource;
+export interface RunboardTestErrorEvidence {
+  source: 'test-error';
   message?: string;
   stack?: string;
   value?: string;
@@ -74,6 +74,21 @@ export interface RunboardErrorEvidence {
   attachmentIndexes?: number[];
   cause?: RunboardErrorEvidence;
 }
+
+export interface RunboardStatusDerivedErrorEvidence {
+  source: 'status-derived';
+  message: string;
+  stack?: string;
+  value?: string;
+  location?: RunboardLocation;
+  snippet?: string;
+  stepPath?: string[];
+  stepCategory?: string;
+  attachmentIndexes?: number[];
+  cause?: RunboardErrorEvidence;
+}
+
+export type RunboardErrorEvidence = RunboardTestErrorEvidence | RunboardStatusDerivedErrorEvidence;
 
 export interface RunboardResultEvidence {
   evidence: RunboardErrorEvidence[];

@@ -11,10 +11,12 @@ import {
   type RunboardReportOptions,
   type RunboardResultEvidence,
   type RunboardStats,
+  type RunboardStatusDerivedErrorEvidence,
   type RunboardTestAnnotation,
   type RunboardTestAttachment,
   type RunboardTestCase,
   type RunboardTestCaseSummary,
+  type RunboardTestErrorEvidence,
   type RunboardTestFile,
   type RunboardTestFileSummary,
   type RunboardTestResult,
@@ -57,7 +59,16 @@ test('exposes the first Runboard Contract Types', () => {
     attachments: [],
     count: 1,
   };
-  const _errorEvidence: RunboardErrorEvidence = { source: 'status-derived', message: 'm' };
+  const _statusDerivedEvidence: RunboardStatusDerivedErrorEvidence = {
+    source: 'status-derived',
+    message: 'm',
+  };
+  const _testErrorEvidence: RunboardTestErrorEvidence = { source: 'test-error' };
+  const _errorEvidence: RunboardErrorEvidence = _statusDerivedEvidence;
+  // @ts-expect-error status-derived evidence requires `message`
+  const _invalidStatusDerived: RunboardErrorEvidence = { source: 'status-derived' };
+  void _testErrorEvidence;
+  void _invalidStatusDerived;
   const _resultEvidence: RunboardResultEvidence = { evidence: [] };
   const _resultSummary: RunboardTestResultSummary = {
     attachments: [],
