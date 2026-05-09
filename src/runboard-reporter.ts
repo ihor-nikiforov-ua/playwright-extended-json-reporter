@@ -1,0 +1,198 @@
+import { createHash } from 'node:crypto';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { dirname, join, relative, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import type {
+  FullConfig,
+  FullResult,
+  Reporter,
+  Suite,
+  TestCase,
+  TestError,
+} from '@playwright/test/reporter';
+import {
+  RUNBOARD_SCHEMA_VERSION,
+  type RunboardMetadata,
+  type RunboardReport,
+  type RunboardStats,
+  type RunboardTestFile,
+  type RunboardTestFileSummary,
+} from './contract.js';
+
+export interface RunboardReporterOptions {
+  outputFolder?: string;
+}
+
+const DEFAULT_OUTPUT_FOLDER = 'playwright-runboard-report';
+
+export class RunboardReporter implements Reporter {
+  private readonly outputFolder: string;
+  private playwrightVersion = '';
+  private configMetadata: Record<string, unknown> = {};
+  private projectNames: string[] = [];
+  private rootDir = '';
+  private rootSuite: Suite | null = null;
+  private readonly testFiles = new Map<string, RunboardTestFile>();
+  private readonly topLevelErrors: TestError[] = [];
+
+  constructor(options: RunboardReporterOptions = {}) {
+    this.outputFolder =
+      options.outputFolder ?? process.env.PLAYWRIGHT_RUNBOARD_OUTPUT_DIR ?? DEFAULT_OUTPUT_FOLDER;
+  }
+
+  printsToStdio(): boolean {
+    return false;
+  }
+
+  onError(error: TestError): void {
+    this.topLevelErrors.push(error);
+  }
+
+  onBegin(config: FullConfig, suite: Suite): void {
+    this.playwrightVersion = config.version;
+    this.configMetadata = (config.metadata ?? {}) as Record<string, unknown>;
+    this.projectNames = suite.suites.map((projectSuite) => projectSuite.project()?.name ?? '');
+    this.rootDir = config.rootDir;
+    this.rootSuite = suite;
+
+    for (const projectSuite of suite.suites) {
+      for (const fileSuite of projectSuite.suites) {
+        const absolute = fileSuite.location?.file;
+        if (!absolute) {
+          continue;
+        }
+        const fileName = toPosixPath(relative(config.rootDir, absolute));
+        const fileId = sha1(fileName).slice(0, 20);
+        if (!this.testFiles.has(fileId)) {
+          this.testFiles.set(fileId, { fileId, fileName, tests: [] });
+        }
+      }
+    }
+  }
+
+  async onEnd(result: FullResult): Promise<void> {
+    const outputFolder = resolve(this.outputFolder);
+    await mkdir(outputFolder, { recursive: true });
+
+    const reporterVersion = await readReporterVersion();
+    const runboard: RunboardMetadata = {
+      schemaVersion: RUNBOARD_SCHEMA_VERSION,
+      reporterVersion,
+      playwrightVersion: this.playwrightVersion,
+    };
+
+    const fileStats = this.computeFileStats();
+
+    const fileSummaries: RunboardTestFileSummary[] = [];
+    for (const file of this.testFiles.values()) {
+      await writeFile(join(outputFolder, `${file.fileId}.json`), JSON.stringify(file), 'utf8');
+      fileSummaries.push({
+        fileId: file.fileId,
+        fileName: file.fileName,
+        tests: [],
+        stats: fileStats.get(file.fileId) ?? emptyStats(),
+      });
+    }
+
+    const aggregateStats = emptyStats();
+    for (const stats of fileStats.values()) {
+      addStats(aggregateStats, stats);
+    }
+
+    const report: RunboardReport = {
+      runboard,
+      metadata: this.configMetadata,
+      startTime: result.startTime.getTime(),
+      duration: result.duration,
+      files: fileSummaries,
+      projectNames: this.projectNames,
+      stats: aggregateStats,
+      errors: this.topLevelErrors.map(formatTopLevelError),
+      options: {},
+      machines: [],
+    };
+
+    await writeFile(join(outputFolder, 'report.json'), JSON.stringify(report), 'utf8');
+  }
+
+  private computeFileStats(): Map<string, RunboardStats> {
+    const fileStats = new Map<string, RunboardStats>();
+    if (!this.rootSuite) {
+      return fileStats;
+    }
+    for (const projectSuite of this.rootSuite.suites) {
+      for (const fileSuite of projectSuite.suites) {
+        const absolute = fileSuite.location?.file;
+        if (!absolute) {
+          continue;
+        }
+        const fileName = toPosixPath(relative(this.rootDir, absolute));
+        const fileId = sha1(fileName).slice(0, 20);
+        let stats = fileStats.get(fileId);
+        if (!stats) {
+          stats = emptyStats();
+          fileStats.set(fileId, stats);
+        }
+        for (const test of fileSuite.allTests()) {
+          accumulateOutcome(stats, test);
+        }
+      }
+    }
+    for (const stats of fileStats.values()) {
+      stats.ok = stats.unexpected + stats.flaky === 0;
+    }
+    return fileStats;
+  }
+}
+
+export default RunboardReporter;
+
+function toPosixPath(p: string): string {
+  return sep === '/' ? p : p.split(sep).join('/');
+}
+
+function sha1(s: string): string {
+  return createHash('sha1').update(s).digest('hex');
+}
+
+function emptyStats(): RunboardStats {
+  return { total: 0, expected: 0, unexpected: 0, flaky: 0, skipped: 0, ok: true };
+}
+
+function formatTopLevelError(error: TestError): string {
+  return error.stack ?? error.message ?? error.value ?? '';
+}
+
+function accumulateOutcome(stats: RunboardStats, test: TestCase): void {
+  stats.total += 1;
+  switch (test.outcome()) {
+    case 'expected':
+      stats.expected += 1;
+      break;
+    case 'unexpected':
+      stats.unexpected += 1;
+      break;
+    case 'flaky':
+      stats.flaky += 1;
+      break;
+    case 'skipped':
+      stats.skipped += 1;
+      break;
+  }
+}
+
+function addStats(target: RunboardStats, delta: RunboardStats): void {
+  target.total += delta.total;
+  target.expected += delta.expected;
+  target.unexpected += delta.unexpected;
+  target.flaky += delta.flaky;
+  target.skipped += delta.skipped;
+  target.ok = target.ok && delta.ok;
+}
+
+async function readReporterVersion(): Promise<string> {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const pkgRaw = await readFile(join(here, '..', 'package.json'), 'utf8');
+  const pkg = JSON.parse(pkgRaw) as { version: string };
+  return pkg.version;
+}
