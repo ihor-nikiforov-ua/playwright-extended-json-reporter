@@ -1,5 +1,7 @@
 import { execFile } from 'node:child_process';
-import { dirname, resolve } from 'node:path';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { expect, test } from '@playwright/test';
@@ -9,8 +11,8 @@ const execFileAsync = promisify(execFile);
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
-async function getInvariant(name: string): Promise<InvariantResult> {
-  const results = await checkInvariants(repoRoot);
+async function getInvariant(name: string, root: string = repoRoot): Promise<InvariantResult> {
+  const results = await checkInvariants(root);
   const result = results.find((r) => r.name === name);
   if (!result) {
     throw new Error(
@@ -73,6 +75,56 @@ test.describe('Generated-output policy', () => {
   test('.gitignore excludes every category of generated output named in the PRD', async () => {
     const r = await getInvariant('gitignore-generated-output');
     expect(r.ok, r.message).toBe(true);
+  });
+});
+
+test.describe('Failure messages identify the invariant and missing inputs', () => {
+  let fixtureRoot: string;
+
+  test.beforeEach(async () => {
+    fixtureRoot = await mkdtemp(join(tmpdir(), 'invariants-fixture-'));
+  });
+
+  test.afterEach(async () => {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  });
+
+  test('missing .nvmrc fails nvmrc-concrete-major with a named invariant result, not a stack trace', async () => {
+    const r = await getInvariant('nvmrc-concrete-major', fixtureRoot);
+    expect(r.ok).toBe(false);
+    expect(r.message).toContain('.nvmrc');
+  });
+
+  test('missing .gitignore fails gitignore-generated-output with a named invariant result, not a stack trace', async () => {
+    const r = await getInvariant('gitignore-generated-output', fixtureRoot);
+    expect(r.ok).toBe(false);
+    expect(r.message).toContain('.gitignore');
+  });
+
+  test('CI workflow with node-version-file only inside a YAML comment fails the CI invariant', async () => {
+    await mkdir(join(fixtureRoot, '.github', 'workflows'), { recursive: true });
+    await writeFile(
+      join(fixtureRoot, '.github', 'workflows', 'ci.yml'),
+      [
+        'name: CI',
+        'on: [push]',
+        'jobs:',
+        '  checks:',
+        '    runs-on: ubuntu-latest',
+        '    steps:',
+        '      - uses: actions/checkout@v6',
+        '      - name: Setup Node.js',
+        '        uses: actions/setup-node@v6',
+        '        with:',
+        '          # node-version-file: .nvmrc (commented out — drift risk)',
+        '          node-version: 20',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    const r = await getInvariant('ci-uses-nvmrc-node-version-file', fixtureRoot);
+    expect(r.ok).toBe(false);
+    expect(r.message).toMatch(/node-version-file/);
   });
 });
 

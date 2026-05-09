@@ -119,6 +119,28 @@ async function checkTypesNodeMatchesNvmrc(repoRoot) {
 }
 
 /**
+ * Strip YAML line comments so that pattern checks ignore commented-out directives.
+ * A `#` only starts a comment when at the start of the line or preceded by whitespace,
+ * which matches YAML's tokenization for our unquoted-scalar workflow files.
+ *
+ * @param {string} yaml
+ * @returns {string}
+ */
+function stripYamlComments(yaml) {
+  return yaml
+    .split('\n')
+    .map((line) => {
+      let out = '';
+      for (let i = 0; i < line.length; i++) {
+        if (line[i] === '#' && (i === 0 || /\s/.test(line[i - 1]))) break;
+        out += line[i];
+      }
+      return out;
+    })
+    .join('\n');
+}
+
+/**
  * @param {string} repoRoot
  * @returns {Promise<InvariantResult>}
  */
@@ -134,14 +156,18 @@ async function checkCiUsesNvmrc(repoRoot) {
       message: `CI workflow not found at .github/workflows/ci.yml`,
     };
   }
-  const ok = /node-version-file:\s*\.nvmrc/.test(ci);
+  const cleaned = stripYamlComments(ci);
+  const usesSetupNode = /uses:\s*actions\/setup-node@/.test(cleaned);
+  const usesNvmrcVersionFile = /(^|\s)node-version-file:\s*\.nvmrc(\s|$)/m.test(cleaned);
+  const ok = usesSetupNode && usesNvmrcVersionFile;
   return {
     name: 'ci-uses-nvmrc-node-version-file',
     ok,
     message: ok
       ? `CI workflow uses node-version-file: .nvmrc`
-      : `CI workflow must drive Node from .nvmrc via 'node-version-file: .nvmrc' to keep ` +
-        `local and CI runtime selection consistent`,
+      : `CI workflow must drive Node from .nvmrc by configuring actions/setup-node with ` +
+        `'node-version-file: .nvmrc' (commented-out directives do not count); found ` +
+        `setup-node=${usesSetupNode}, node-version-file=.nvmrc=${usesNvmrcVersionFile}`,
   };
 }
 
@@ -257,22 +283,58 @@ async function checkGitignoreGeneratedOutput(repoRoot) {
   };
 }
 
+/** @type {ReadonlyArray<readonly [string, (repoRoot: string) => Promise<InvariantResult>]>} */
+const INVARIANTS = [
+  ['playwright-peer-policy', checkPlaywrightPeerPolicy],
+  ['nvmrc-concrete-major', checkNvmrcConcreteMajor],
+  ['engines-node-matches-nvmrc', checkEnginesNodeMatchesNvmrc],
+  ['types-node-matches-nvmrc', checkTypesNodeMatchesNvmrc],
+  ['ci-uses-nvmrc-node-version-file', checkCiUsesNvmrc],
+  ['package-exports-single-entrypoint', checkPackageExportsSingleEntrypoint],
+  ['package-main-types-point-at-dist', checkPackageMainTypesPointAtDist],
+  ['package-files-allowlist', checkPackageFilesAllowlist],
+  ['gitignore-generated-output', checkGitignoreGeneratedOutput],
+];
+
+/**
+ * Convert a thrown error into an invariant-specific failure so a missing or unreadable
+ * policy file surfaces as a named, actionable result instead of a raw stack trace.
+ *
+ * @param {string} name
+ * @param {unknown} err
+ * @returns {InvariantResult}
+ */
+function failureFromError(name, err) {
+  const e = /** @type {NodeJS.ErrnoException} */ (err);
+  if (e && e.code === 'ENOENT') {
+    return {
+      name,
+      ok: false,
+      message: `cannot evaluate '${name}': required policy file not found at ${e.path ?? '<unknown path>'}`,
+    };
+  }
+  return {
+    name,
+    ok: false,
+    message: `cannot evaluate '${name}': ${e?.message ?? String(err)}`,
+  };
+}
+
 /**
  * @param {string} repoRoot
  * @returns {Promise<InvariantResult[]>}
  */
 export async function checkInvariants(repoRoot) {
-  return [
-    await checkPlaywrightPeerPolicy(repoRoot),
-    await checkNvmrcConcreteMajor(repoRoot),
-    await checkEnginesNodeMatchesNvmrc(repoRoot),
-    await checkTypesNodeMatchesNvmrc(repoRoot),
-    await checkCiUsesNvmrc(repoRoot),
-    await checkPackageExportsSingleEntrypoint(repoRoot),
-    await checkPackageMainTypesPointAtDist(repoRoot),
-    await checkPackageFilesAllowlist(repoRoot),
-    await checkGitignoreGeneratedOutput(repoRoot),
-  ];
+  /** @type {InvariantResult[]} */
+  const results = [];
+  for (const [name, fn] of INVARIANTS) {
+    try {
+      results.push(await fn(repoRoot));
+    } catch (err) {
+      results.push(failureFromError(name, err));
+    }
+  }
+  return results;
 }
 
 const isMain =
