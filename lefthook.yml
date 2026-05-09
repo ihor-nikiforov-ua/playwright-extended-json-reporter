@@ -1,0 +1,11 @@
+pre-commit:
+  jobs:
+    - name: biome check staged files
+      run: npm run check:staged:write
+      stage_fixed: true
+
+pre-push:
+  jobs:
+    - name: typecheck
+      run: npm run typecheck
+

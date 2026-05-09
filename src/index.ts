@@ -145,7 +145,11 @@ export default class ExtendedJsonReporter implements Reporter {
 
     const outputFile = resolve(this.options.outputFile);
     await mkdir(dirname(outputFile), { recursive: true });
-    await writeFile(outputFile, `${JSON.stringify(report, null, jsonSpacing(this.options.pretty))}\n`, 'utf8');
+    await writeFile(
+      outputFile,
+      `${JSON.stringify(report, null, jsonSpacing(this.options.pretty))}\n`,
+      'utf8',
+    );
   }
 }
 
