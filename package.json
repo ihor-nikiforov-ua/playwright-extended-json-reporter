@@ -1,0 +1,50 @@
+{
+  "name": "playwright-extended-json-reporter",
+  "version": "0.1.0",
+  "description": "An extended JSON reporter for Playwright Test.",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ihor-nikiforov-ua/playwright-extended-json-reporter.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ihor-nikiforov-ua/playwright-extended-json-reporter/issues"
+  },
+  "homepage": "https://github.com/ihor-nikiforov-ua/playwright-extended-json-reporter#readme",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "npm run build",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "keywords": [
+    "playwright",
+    "reporter",
+    "json",
+    "test-results"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "peerDependencies": {
+    "@playwright/test": ">=1.40.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@types/node": "^25.6.2",
+    "typescript": "^5.8.3"
+  }
+}
