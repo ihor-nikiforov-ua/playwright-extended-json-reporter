@@ -13,7 +13,6 @@ Create a Playwright reporter that emits Runboard-consumable current-run data mat
 - Local project glossary: `CONTEXT.md`
 - PRD: `docs/prd/runboard-reporter-data-contract.md`
 - Error Catalog: `docs/error-catalog/playwright-error-types.md`
-- Open questions: `docs/grill/unanswered-questions.md`
 - ADRs: `docs/adr/`
 - Official Playwright HTML reporter source: `/Users/ingvar/Projects/playwright/packages/playwright/src/reporters/html.ts`
 - Official HTML reporter data types: `/Users/ingvar/Projects/playwright/packages/html-reporter/src/types.d.ts`
@@ -38,7 +37,6 @@ playwright-runboard-report/
 
 - Default output folder: `playwright-runboard-report`.
 - Package/API naming: `playwright-runboard-reporter`, default export/class `RunboardReporter`.
-- Legacy flat reporter compatibility: intentionally removed; old options should fail with migration guidance.
 - Playwright support range: `@playwright/test >=1.59 <2`.
 - Option name: `outputFolder`, matching Playwright HTML reporter.
 - Env var: `PLAYWRIGHT_RUNBOARD_OUTPUT_DIR`; `PLAYWRIGHT_RUNBOARD_REPORT` is intentionally not supported.
@@ -47,7 +45,7 @@ playwright-runboard-report/
 - Accept `open`, `host`, `port`, and `doNotInlineAssets` as no-op compatibility options.
 - Clear output folder before writing a new run.
 - Use Playwright-compatible `fileId`: SHA-1 of relative source test file name, first 20 chars.
-- Add Runboard Extensions only under `report.runboard` and `result.runboard` in v1.
+- Add Runboard Extensions only under `report.runboard` and `result.runboard` in the first supported schema.
 - `report.runboard` contains only `schemaVersion`, `reporterVersion`, and `playwrightVersion`.
 - Preserve Playwright-compatible `errors[].message` where possible.
 - Add Structured Error Evidence under `result.runboard`, but do not classify errors in the reporter.
@@ -68,12 +66,12 @@ playwright-runboard-report/
 - `0005-do-not-classify-errors-in-the-reporter.md`
 - `0006-name-the-consumer-runboard.md`
 
-## Known Open Questions
+## Remaining Review Areas
 
-See `docs/grill/unanswered-questions.md`. Highest-priority unresolved areas:
+Highest-priority areas to review:
 
 - Exact Runboard Data Contract TypeScript shapes.
-- Structured Error Evidence v1 fields.
+- Structured Error Evidence fields.
 - Differential compatibility test normalization rules.
 - Fixture architecture for the all-45 Error Catalog Suite.
 - First implementation milestone.

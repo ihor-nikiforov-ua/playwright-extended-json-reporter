@@ -2,7 +2,7 @@
 
 A Playwright reporter for Runboard. It emits a current-run Runboard Data Bundle that follows Playwright's official HTML Report Data shape without generating a rendered HTML report.
 
-This package is the planned clean replacement for the legacy flat extended JSON reporter. The v1 product and contract decisions live in [`docs/prd/runboard-reporter-data-contract.md`](docs/prd/runboard-reporter-data-contract.md).
+Product and contract decisions live in [`docs/prd/runboard-reporter-data-contract.md`](docs/prd/runboard-reporter-data-contract.md).
 
 ## Target Usage
 
