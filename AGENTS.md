@@ -6,7 +6,7 @@ This repo uses `AGENTS.md` as the canonical instruction file for coding agents.
 
 ### Issue tracker
 
-Issues and PRDs are tracked in GitHub Issues for `ihor-nikiforov-ua/playwright-extended-json-reporter`. See `docs/agents/issue-tracker.md`.
+Issues and PRDs are tracked in GitHub Issues for `ihor-nikiforov-ua/playwright-runboard-reporter`. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

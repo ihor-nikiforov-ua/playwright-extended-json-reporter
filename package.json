@@ -1,16 +1,16 @@
 {
-  "name": "playwright-extended-json-reporter",
+  "name": "playwright-runboard-reporter",
   "version": "0.1.0",
-  "description": "An extended JSON reporter for Playwright Test.",
+  "description": "A Playwright reporter that emits Runboard data bundles.",
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ihor-nikiforov-ua/playwright-extended-json-reporter.git"
+    "url": "git+https://github.com/ihor-nikiforov-ua/playwright-runboard-reporter.git"
   },
   "bugs": {
-    "url": "https://github.com/ihor-nikiforov-ua/playwright-extended-json-reporter/issues"
+    "url": "https://github.com/ihor-nikiforov-ua/playwright-runboard-reporter/issues"
   },
-  "homepage": "https://github.com/ihor-nikiforov-ua/playwright-extended-json-reporter#readme",
+  "homepage": "https://github.com/ihor-nikiforov-ua/playwright-runboard-reporter#readme",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -37,7 +37,7 @@
   "keywords": [
     "playwright",
     "reporter",
-    "json",
+    "runboard",
     "test-results"
   ],
   "author": "",

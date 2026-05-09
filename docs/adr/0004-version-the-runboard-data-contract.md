@@ -1,0 +1,5 @@
+# Version the Runboard data contract
+
+The Report Summary will include a Runboard Data Contract Schema Version as well as the Playwright and Runboard Reporter package versions. Playwright's official HTML reporter does not need an explicit schema marker because its producer and UI ship together, but this Runboard Reporter and the Runboard can evolve independently and need an ingestion guardrail. Playwright HTML reporter field names remain unchanged where possible, and Runboard Extensions are namespaced away from Playwright-shaped fields.
+
+The Schema Version uses semver and starts at `1.0.0` for the first supported Runboard Data Contract. The Runboard Reporter package may still be versioned `0.x` while the implementation matures; `report.runboard.reporterVersion` identifies the producer build, while `report.runboard.schemaVersion` identifies the JSON shape. Schema Version major bumps are for breaking contract changes, minor bumps are for additive compatible fields or enum values, and patch bumps are for clarifications or bugfixes that do not change the JSON shape.

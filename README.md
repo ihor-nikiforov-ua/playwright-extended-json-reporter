@@ -1,15 +1,10 @@
-# playwright-extended-json-reporter
+# playwright-runboard-reporter
 
-A small Playwright reporter that writes a normalized JSON summary with test metadata,
-retry details, errors, stdio, and attachment references.
+A Playwright reporter for Runboard. It emits a current-run Runboard Data Bundle that follows Playwright's official HTML Report Data shape without generating a rendered HTML report.
 
-## Install
+This package is the planned clean replacement for the legacy flat extended JSON reporter. The v1 product and contract decisions live in [`docs/prd/runboard-reporter-data-contract.md`](docs/prd/runboard-reporter-data-contract.md).
 
-```sh
-npm install --save-dev playwright-extended-json-reporter
-```
-
-## Usage
+## Target Usage
 
 ```ts
 // playwright.config.ts
@@ -19,31 +14,28 @@ export default defineConfig({
   reporter: [
     ['list'],
     [
-      'playwright-extended-json-reporter',
+      'playwright-runboard-reporter',
       {
-        outputFile: 'test-results/extended-report.json',
-        pretty: true,
+        outputFolder: 'playwright-runboard-report',
       },
     ],
   ],
 });
 ```
 
-## Options
+## Target Output
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `outputFile` | `string` | `playwright-extended-report.json` | Path for the generated report. |
-| `pretty` | `boolean \| number` | `true` | Pretty-print JSON with 2 spaces, a custom number of spaces, or no spacing. |
-| `includeAttachments` | `boolean` | `true` | Include attachment metadata and file paths. |
-| `includeStdIO` | `boolean` | `true` | Include serialized stdout and stderr chunks. |
+```text
+playwright-runboard-report/
+  report.json
+  <fileId>.json
+  data/
+    <sha>.<ext>
+```
 
 ## Development
-
-Use the latest Node.js LTS release.
 
 ```sh
 npm install
 npm run build
 ```
-
