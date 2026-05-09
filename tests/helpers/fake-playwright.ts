@@ -57,7 +57,11 @@ export function fakeRun(spec: FakeRunSpec): FakeRun {
     for (const [index, testSpec] of file.tests.entries()) {
       const test = createTestCase(testSpec, fileSuite, file.fileName, index);
       fileSuite.tests.push(test);
-      testResults.push({ test, result: test.results[0] });
+      const [primaryResult] = test.results;
+      if (!primaryResult) {
+        throw new Error('createTestCase must seed the test with a primary result');
+      }
+      testResults.push({ test, result: primaryResult });
     }
   }
 

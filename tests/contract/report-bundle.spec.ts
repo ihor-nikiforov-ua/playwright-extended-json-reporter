@@ -97,8 +97,8 @@ test.describe('RunboardReporter — Producer Contract', () => {
   });
 
   test('honors PLAYWRIGHT_RUNBOARD_OUTPUT_DIR when no outputFolder option is provided', async () => {
-    const original = process.env.PLAYWRIGHT_RUNBOARD_OUTPUT_DIR;
-    process.env.PLAYWRIGHT_RUNBOARD_OUTPUT_DIR = outputFolder;
+    const original = process.env['PLAYWRIGHT_RUNBOARD_OUTPUT_DIR'];
+    process.env['PLAYWRIGHT_RUNBOARD_OUTPUT_DIR'] = outputFolder;
     try {
       const reporter = new RunboardReporter();
       const run = fakeRun({ rootDir: '/repo' });
@@ -110,9 +110,9 @@ test.describe('RunboardReporter — Producer Contract', () => {
       expect(() => JSON.parse(reportRaw)).not.toThrow();
     } finally {
       if (original === undefined) {
-        delete process.env.PLAYWRIGHT_RUNBOARD_OUTPUT_DIR;
+        delete process.env['PLAYWRIGHT_RUNBOARD_OUTPUT_DIR'];
       } else {
-        process.env.PLAYWRIGHT_RUNBOARD_OUTPUT_DIR = original;
+        process.env['PLAYWRIGHT_RUNBOARD_OUTPUT_DIR'] = original;
       }
     }
   });
@@ -222,9 +222,9 @@ test.describe('RunboardReporter — Producer Contract', () => {
   });
 
   test('options.outputFolder wins over PLAYWRIGHT_RUNBOARD_OUTPUT_DIR', async () => {
-    const original = process.env.PLAYWRIGHT_RUNBOARD_OUTPUT_DIR;
+    const original = process.env['PLAYWRIGHT_RUNBOARD_OUTPUT_DIR'];
     const envFolder = await mkdtemp(join(tmpdir(), 'runboard-env-'));
-    process.env.PLAYWRIGHT_RUNBOARD_OUTPUT_DIR = envFolder;
+    process.env['PLAYWRIGHT_RUNBOARD_OUTPUT_DIR'] = envFolder;
     try {
       const reporter = new RunboardReporter({ outputFolder });
       const run = fakeRun({ rootDir: '/repo' });
@@ -237,9 +237,9 @@ test.describe('RunboardReporter — Producer Contract', () => {
     } finally {
       await rm(envFolder, { recursive: true, force: true });
       if (original === undefined) {
-        delete process.env.PLAYWRIGHT_RUNBOARD_OUTPUT_DIR;
+        delete process.env['PLAYWRIGHT_RUNBOARD_OUTPUT_DIR'];
       } else {
-        process.env.PLAYWRIGHT_RUNBOARD_OUTPUT_DIR = original;
+        process.env['PLAYWRIGHT_RUNBOARD_OUTPUT_DIR'] = original;
       }
     }
   });

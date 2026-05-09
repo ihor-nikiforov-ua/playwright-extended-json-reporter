@@ -37,7 +37,9 @@ export class RunboardReporter implements Reporter {
 
   constructor(options: RunboardReporterOptions = {}) {
     this.outputFolder =
-      options.outputFolder ?? process.env.PLAYWRIGHT_RUNBOARD_OUTPUT_DIR ?? DEFAULT_OUTPUT_FOLDER;
+      options.outputFolder ??
+      process.env['PLAYWRIGHT_RUNBOARD_OUTPUT_DIR'] ??
+      DEFAULT_OUTPUT_FOLDER;
   }
 
   printsToStdio(): boolean {
