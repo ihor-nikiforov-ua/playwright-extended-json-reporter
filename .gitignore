@@ -2,8 +2,10 @@ node_modules/
 dist/
 coverage/
 playwright-report/
+playwright-runboard-report/
 test-results/
 .runboard-int-*/
 *.log
+*.tgz
 .DS_Store
 references/
