@@ -2,7 +2,7 @@
 
 A Playwright reporter for Runboard. It emits a current-run Runboard Data Bundle that follows Playwright's official HTML Report Data shape without generating a rendered HTML report.
 
-Product and contract decisions live in [`docs/prd/runboard-reporter-data-contract.md`](docs/prd/runboard-reporter-data-contract.md).
+The canonical in-repo data-contract plan lives in [`docs/prd/runboard-reporter-data-contract.md`](docs/prd/runboard-reporter-data-contract.md); GitHub Issues track implementation work.
 
 ## Target Usage
 

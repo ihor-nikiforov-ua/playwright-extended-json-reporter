@@ -1,0 +1,3 @@
+# Guard output folder clearing
+
+The Runboard Reporter will clear its Output Folder before writing the current Runboard Data Bundle, matching Playwright's HTML reporter cleanup model, but it will refuse to clear resolved paths that exactly equal the filesystem root, `process.cwd()`, Playwright `configDir`, Playwright `config.rootDir`, any project `testDir`, or any project `outputDir`. We choose this small safety divergence because deleting report output is expected reporter behavior, but a reusable package should fail loudly before clearing directories that are likely to contain source, config, or test artifacts.

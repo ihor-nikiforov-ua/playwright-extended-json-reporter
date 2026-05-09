@@ -52,13 +52,14 @@ The Runboard owns rendering, history storage, Previous Run comparison, and Error
 
 - Build a Runboard Reporter, not a rendered Runboard app or HTML report generator.
 - Use `playwright-runboard-reporter` and `RunboardReporter` as the package/API language.
-- Rename the GitHub repository to match `playwright-runboard-reporter`.
+- Treat the GitHub repository rename to `playwright-runboard-reporter` as complete.
 - Adopt the HTML Report Data Parity Rule for the Runboard Reporter data-shape target.
 - Set the initial Playwright peer dependency support range to `@playwright/test >=1.59 <2`.
+- Treat Playwright minor versions inside the support range as supported when the Compatibility Fixtures pass against that version; if a minor breaks parity, pause for an explicit support-range or adapter decision.
 - Treat older Playwright `1.40+` error wording research as fixture-design input, not as a support claim.
 - Emit only the current run. Previous Runs are handled by the Runboard or its storage/ingestion layer.
 - Match Playwright HTML reporter behavior for sharding: direct sharded invocations emit that shard's current-run bundle, while `merge-reports` over blob reports emits one merged Runboard Data Bundle.
-- Preserve Playwright-compatible `report.machines[]` metadata for merged blob reports, including shard indexes where Playwright provides them.
+- Always include Playwright-compatible `report.machines[]`; non-merged runs use an empty array, while merged blob reports include machine metadata and shard indexes where Playwright provides them.
 - Emit a Runboard Data Bundle with `report.json`, `<fileId>.json`, and `data/<sha>.<ext>` attachment assets.
 - Default the output folder to `playwright-runboard-report`.
 - Use `outputFolder`, matching Playwright's HTML reporter option name.
@@ -66,33 +67,38 @@ The Runboard owns rendering, history storage, Previous Run comparison, and Error
 - Support `attachmentsBaseURL`, defaulting to `data/`, with Runboard-specific env var `PLAYWRIGHT_RUNBOARD_ATTACHMENTS_BASE_URL`.
 - Support Playwright-applicable options: `outputFolder`, `attachmentsBaseURL`, `title`, `noSnippets`, and `noCopyPrompt`.
 - Preserve Playwright-applicable report options such as `title`, `noSnippets`, and `noCopyPrompt` in `report.options`, matching Playwright's HTML report shape.
+- Do not include `attachmentsBaseURL` in `report.options`; Playwright's HTML reporter uses it to write attachment paths but does not serialize it in `HTMLReport.options`.
 - Define `RunboardReportOptions` as the serialized `report.options` shape, not the reporter constructor options: `{ title?: string; noCopyPrompt?: boolean; noSnippets?: boolean }`.
 - Use `RunboardReporterOptions` for reporter constructor/config input.
 - Define `RunboardReporterOptions` with `outputFolder`, `attachmentsBaseURL`, `title`, `noSnippets`, `noCopyPrompt`, and the no-op compatibility options `open`, `host`, `port`, and `doNotInlineAssets`.
 - Accept `open`, `host`, `port`, and `doNotInlineAssets` as no-op compatibility options because this package does not render or serve HTML.
-- Emit a once-per-option warning when a no-op compatibility option is supplied, and do not include no-op compatibility options in `report.options`.
+- Emit a once-per-option warning during `onBegin` when a no-op compatibility option is supplied, using `console.warn` with the stable `playwright-runboard-reporter:` prefix, and do not include no-op compatibility options in `report.options`.
 - Clear the Runboard Data Bundle output folder before writing the current run.
 - Follow Playwright HTML reporter behavior by warning when the output folder overlaps with Playwright test artifact directories.
-- Add a Runboard Reporter safety guard that refuses to clear exact dangerous directories such as the filesystem root, current working directory, config root directory, project test directory, or project output directory.
-- Use Playwright-compatible `fileId`: first 20 characters of SHA-1 of the relative source test file name.
+- Resolve the Output Folder to an absolute path before clearing it.
+- Add a Runboard Reporter safety guard that refuses to clear when the resolved Output Folder exactly equals the filesystem root, `process.cwd()`, Playwright `configDir`, Playwright `config.rootDir`, any project `testDir`, or any project `outputDir`.
+- Use Playwright-compatible `fileId`: first 20 characters of SHA-1 of the POSIX-normalized source test file name relative to Playwright `config.rootDir`.
 - Preserve Playwright HTML reporter field names where possible.
 - Export `Runboard`-prefixed public data-contract types rather than bare names such as `TestCase` or `TestResult`.
 - Put canonical Runboard Data Contract types and schema constants in `src/contract.ts`, and re-export them from `src/index.ts`.
-- Export these public data-contract types for the first supported schema: `RunboardReport`, `RunboardReportOptions`, `RunboardMetadata`, `RunboardStats`, `RunboardLocation`, `RunboardMachine`, `RunboardTestFile`, `RunboardTestFileSummary`, `RunboardTestCase`, `RunboardTestCaseSummary`, `RunboardTestResult`, `RunboardTestResultSummary`, `RunboardTestAttachment`, `RunboardTestStep`, `RunboardResultEvidence`, and `RunboardErrorEvidence`.
-- Define `RunboardReport` as the Playwright HTML reporter `HTMLReport` field shape plus `runboard: RunboardMetadata`.
-- Define `RunboardTestResult` as the Playwright HTML reporter `TestResult` field shape plus optional `runboard?: RunboardResultEvidence`.
+- Export these public data-contract types for the first supported schema: `RunboardReport`, `RunboardReportOptions`, `RunboardMetadata`, `RunboardStats`, `RunboardLocation`, `RunboardMachine`, `RunboardTestAnnotation`, `RunboardTestFile`, `RunboardTestFileSummary`, `RunboardTestCase`, `RunboardTestCaseSummary`, `RunboardTestResult`, `RunboardTestResultSummary`, `RunboardTestAttachment`, `RunboardTestStep`, `RunboardResultEvidence`, and `RunboardErrorEvidence`.
+- Preserve tags, project names, and repeat indexes as primitive fields on the Playwright-compatible report and test-case shapes: `tags: string[]`, `projectName: string`, `projectNames: string[]`, and `repeatEachIndex?: number`.
+- Define `RunboardReport` as structurally mirroring Playwright's serialized HTML report field shape plus `runboard: RunboardMetadata`.
+- Match Playwright's split-file HTML report boundary: `report.json` contains `RunboardTestFileSummary[]` with `RunboardTestCaseSummary[]` and lightweight `RunboardTestResultSummary[]`; each `<fileId>.json` contains a full `RunboardTestFile` with `RunboardTestCase[]` and full `RunboardTestResult[]`.
+- Define `RunboardTestResult` as structurally mirroring Playwright's serialized HTML report test-result field shape plus optional `runboard?: RunboardResultEvidence`.
 - Add Runboard Extensions only under `report.runboard` and `result.runboard` in the first contract.
 - Keep `report.runboard` minimal: `schemaVersion`, `reporterVersion`, and `playwrightVersion`.
 - Define `RunboardMetadata` with exactly three required string fields: `schemaVersion`, `reporterVersion`, and `playwrightVersion`.
 - Export `RUNBOARD_SCHEMA_VERSION = '1.0.0'` from `src/contract.ts` as the single code-level schema version source.
 - Write `report.runboard.schemaVersion` from `RUNBOARD_SCHEMA_VERSION`.
+- Write `report.runboard.playwrightVersion` from Playwright's public `FullConfig.version` string for the run being reported.
 - Use semver for `report.runboard.schemaVersion`, starting the first supported Runboard Data Contract at `1.0.0`.
 - Treat `report.runboard.schemaVersion` as the JSON contract version and `report.runboard.reporterVersion` as the Runboard Reporter package version; they can change independently.
 - Preserve Playwright-compatible `errors[].message` where possible.
 - Add Structured Error Evidence under `result.runboard` for Runboard rendering and classification, but do not add reporter-side `errorType` classification.
 - Define `RunboardResultEvidence` as `{ evidence: RunboardErrorEvidence[] }` in the first contract.
 - Align Structured Error Evidence entries one-to-one with Playwright HTML-report failure display entries, including status-derived failures that do not have a raw `TestError`.
-- When `result.runboard` exists, `result.runboard.evidence[i]` is the structured evidence for `result.errors[i]`.
+- When `result.runboard` exists, `result.runboard.evidence[i]` is the structured evidence for `result.errors[i]`, where `result.errors[]` is the serialized HTML-report display error array, not Playwright's raw public reporter API `TestResult.errors[]`.
 - Define Structured Error Evidence as a discriminated union with `source: 'test-error'` for evidence derived from a Playwright `TestError` and `source: 'status-derived'` for failures derived from result or expected-status logic.
 - Document that Playwright does not expose these source labels; they are Runboard Data Contract provenance labels for the branches currently flattened by Playwright's `formatResultFailure()`: status/expected-status display entries and formatted raw `result.errors[]` entries.
 - Define `RunboardErrorEvidence` with only `source`, `message`, `stack`, `value`, `location`, `snippet`, `stepPath`, `stepCategory`, `attachmentIndexes`, and recursive `cause`; `status-derived` evidence requires `message`, while other fields remain optional.
@@ -106,6 +112,9 @@ The Runboard owns rendering, history storage, Previous Run comparison, and Error
 - Use `docs/error-catalog/playwright-error-types.md` as the canonical Error Catalog for the all-45 coverage requirement.
 - Keep the Reporter Fixture Suite development-only and excluded from the published package.
 - Use differential tests against Playwright's official HTML reporter output for the same fixtures.
+- Differential tests fail on every mismatch except an explicit allowlist of normalized run/environment noise: absolute path roots to POSIX relative paths, timestamps and durations, attachment content hashes or paths when fixture bytes are equivalent, generated snippets or codeframes where only line endings or root paths differ, and version/package metadata.
+- Require producer-side contract tests that prove emitted `report.json` and `<fileId>.json` entries match the Runboard Data Contract.
+- Do not perform runtime schema validation inside the v1 Runboard Reporter before writing bundles; runtime bundle validation belongs to the Runboard or ingestion layer when reading a Runboard Data Bundle.
 - Test external behavior of the Runboard Data Bundle rather than internal implementation details.
 - Verify no-op compatibility options are accepted and still produce a valid bundle.
 - Verify attachment behavior: copied path assets, inline text bodies, stdout/stderr as attachments, traces/screenshots/videos remaining navigable.
@@ -127,6 +136,8 @@ The Runboard owns rendering, history storage, Previous Run comparison, and Error
 - Depending broadly on Playwright private runtime modules.
 
 ## Further Notes
+
+This file is the canonical in-repo data-contract PRD. GitHub Issues are the canonical implementation tracker and may link or mirror this planning content.
 
 The local Playwright source at `/Users/ingvar/Projects/playwright` is the primary reference for official HTML reporter behavior while planning locally. The canonical Error Catalog for this repo is `docs/error-catalog/playwright-error-types.md`; the existing synthetic suite at `/Users/ingvar/Projects/ttt` remains useful research material, but its 500-test Runboard-fixture mission is broader than this package's reporter-focused fixture needs.
 

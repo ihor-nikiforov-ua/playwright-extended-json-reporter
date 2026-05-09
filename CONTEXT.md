@@ -20,6 +20,10 @@ _Avoid_: Plain JSON summary, report dump
 The stable data-bundle output shape produced by the Runboard Reporter and consumed by the Runboard; it does not include a rendered HTML report.
 _Avoid_: Report UI, rendered report
 
+**Producer Contract Test**:
+A reporter-side automated test that proves emitted Runboard Data Bundle files match the Runboard Data Contract.
+_Avoid_: Runtime producer validation, consumer ingest validation
+
 **Runboard Contract Type**:
 A public TypeScript export that describes the versioned Runboard Data Contract JSON shape and uses a `Runboard` prefix even when its fields mirror Playwright HTML Report Data.
 _Avoid_: Bare TestCase, bare TestResult, private HTML reporter type re-export
@@ -29,7 +33,7 @@ The `src/contract.ts` source module that owns Runboard Data Contract public type
 _Avoid_: types bucket, docs-only schema
 
 **Report Summary**:
-The `report.json` entry in the Runboard Data Contract, containing schema/version markers, run metadata, aggregate stats, project names, top-level errors, and per-file summaries.
+The `report.json` entry in the Runboard Data Contract, containing schema/version markers, run metadata, aggregate stats, project names, top-level errors, and Playwright-compatible per-file summaries.
 _Avoid_: Root report, main JSON
 
 **Schema Version**:
@@ -49,7 +53,7 @@ A Runboard Data Contract field that is not part of Playwright's HTML Report Data
 _Avoid_: Custom top-level field, extra field
 
 **Test File Entry**:
-A `<fileId>.json` entry in the Runboard Data Contract, containing full test-case details for one source test file; `fileId` follows Playwright HTML reporter compatibility by using the first 20 characters of the SHA-1 of the relative source file name.
+A `<fileId>.json` entry in the Runboard Data Contract, containing full Playwright-compatible test-case details for one source test file; `fileId` follows Playwright HTML reporter compatibility by using the first 20 characters of the SHA-1 of the POSIX-normalized source file name relative to Playwright `config.rootDir`.
 _Avoid_: Spec dump, details blob
 
 **Attachment Asset**:
@@ -61,7 +65,7 @@ The output directory produced by the Runboard Reporter, defaulting to `playwrigh
 _Avoid_: HTML report, report folder
 
 **Output Folder**:
-The configurable directory where the Runboard Reporter writes the Runboard Data Bundle.
+The configurable directory where the Runboard Reporter writes the Runboard Data Bundle, resolved to an absolute path before cleanup.
 _Avoid_: Output file, report file
 
 **Runboard Output Environment Variable**:
@@ -81,7 +85,7 @@ The serialized `report.options` contract shape containing Playwright-applicable 
 _Avoid_: Reporter constructor options, output configuration
 
 **No-op Compatibility Option**:
-A Playwright HTML reporter option accepted by the Runboard Reporter for config compatibility but ignored with a once-per-option warning because this package does not render, serve, or open HTML.
+A Playwright HTML reporter option accepted by the Runboard Reporter for config compatibility but ignored with a once-per-option `onBegin` warning because this package does not render, serve, or open HTML.
 _Avoid_: Supported serving option, hidden behavior
 
 **Runboard**:
@@ -113,7 +117,7 @@ Analytics behavior that maps preserved Playwright failure data to an Error Type 
 _Avoid_: Reporter support, reporter error typing
 
 **Structured Error Evidence**:
-A Result Evidence entry aligned to one Playwright HTML-report failure display entry, preserving structured failure details without assigning an Error Type in the Runboard Reporter.
+A Result Evidence entry aligned to one serialized HTML-report display error, preserving structured failure details without assigning an Error Type in the Runboard Reporter.
 _Avoid_: Reporter classification, formatted-only error
 
 **Runboard Metadata**:
@@ -125,7 +129,7 @@ Runboard Extension data stored under `result.runboard`, containing an `evidence`
 _Avoid_: Test-level custom fields, step-level custom fields
 
 **Compatibility Fixture**:
-A deliberately small Playwright test suite run through both the Runboard Reporter and Playwright's official HTML reporter to compare their generated data.
+A deliberately small Playwright test suite run through both the Runboard Reporter and Playwright's official HTML reporter to compare normalized generated data.
 _Avoid_: Reporter test, sample report
 
 **Reporter Fixture Suite**:
@@ -164,9 +168,10 @@ _Avoid_: Research range, untested historical support
 
 - The **Runboard Reporter** emits a **Runboard Data Bundle** for one Playwright test run.
 - The **Runboard Reporter Package** is named `playwright-runboard-reporter` and exports `RunboardReporter`.
-- The GitHub repository should be renamed to match the **Runboard Reporter Package**.
+- The GitHub repository has been renamed to match the **Runboard Reporter Package**.
 - The **HTML Report Data Parity Rule** governs the Runboard Reporter's data-shape target.
 - The first **Playwright Support Range** is `@playwright/test >=1.59 <2`.
+- A Playwright minor version inside the **Playwright Support Range** is supported when Compatibility Fixtures pass for that version; parity breaks require an explicit support-range or adapter decision.
 - Playwright `1.40+` wording research informs the **Error Catalog**, but is not a support promise until compatibility fixtures prove it.
 - A **Runboard Data Bundle** defaults to `playwright-runboard-report/` and contains `report.json`, `<fileId>.json` entries, and `data/<sha>.<ext>` Attachment Assets.
 - The **Output Folder** is configured with `outputFolder`, matching Playwright's HTML reporter option name.
@@ -175,18 +180,25 @@ _Avoid_: Research range, untested historical support
 - **Runboard Reporter Options** include `outputFolder`, `attachmentsBaseURL`, `title`, `noSnippets`, `noCopyPrompt`, and explicitly typed **No-op Compatibility Options**.
 - Playwright-applicable **Runboard Reporter Options** such as `title`, `noSnippets`, and `noCopyPrompt` are preserved in **Runboard Report Options**, not in **Runboard Metadata**.
 - **Runboard Report Options** contains only `title`, `noCopyPrompt`, and `noSnippets`.
+- `attachmentsBaseURL` configures **Attachment Asset** paths but is not part of **Runboard Report Options**, matching Playwright's serialized `HTMLReport.options` shape.
 - `open`, `host`, `port`, and `doNotInlineAssets` are **No-op Compatibility Options** and are not included in `report.options`.
+- **No-op Compatibility Option** warnings are emitted during `onBegin` through `console.warn` with the stable `playwright-runboard-reporter:` prefix, once per supplied no-op option.
 - The **Compatibility Smoke Suite** verifies that **No-op Compatibility Options** are accepted and do not prevent Runboard Data Bundle creation.
 - The **Runboard Reporter** clears the **Runboard Data Bundle** output directory before writing the current run, following Playwright's HTML reporter cleanup model.
-- The **Runboard Reporter** warns when the **Output Folder** overlaps with Playwright test artifact directories and refuses to clear exact dangerous directories such as the filesystem root, current working directory, config root directory, project test directory, or project output directory.
+- The **Runboard Reporter** warns when the **Output Folder** overlaps with Playwright test artifact directories.
+- The **Runboard Reporter** refuses to clear an **Output Folder** whose resolved absolute path exactly equals the filesystem root, `process.cwd()`, Playwright `configDir`, Playwright `config.rootDir`, any project `testDir`, or any project `outputDir`.
 - The **Runboard Data Contract** defines how the **Runboard Reporter** packages **HTML Report Data** for the **Runboard**.
-- Public exported data-contract shapes are **Runboard Contract Types**; they use `Runboard`-prefixed names such as `RunboardTestCase` to distinguish them from Playwright's runtime reporter API objects and private HTML reporter data types.
+- Public exported data-contract shapes are **Runboard Contract Types**; they use `Runboard`-prefixed names such as `RunboardTestCase` and `RunboardTestAnnotation` to distinguish them from Playwright's runtime reporter API objects and private HTML reporter data types.
+- Tags, project names, and repeat indexes remain primitive fields in **Runboard Contract Types**, not separate exported alias types.
 - The **Contract Module** is the canonical source for **Runboard Contract Types** and schema constants; README and docs explain that module rather than redefining a second contract.
 - A direct sharded Playwright invocation emits a **Runboard Data Bundle** for that shard's current invocation.
-- When Playwright `merge-reports` replays blob reports into the **Runboard Reporter**, the reporter emits a **Merged Runboard Data Bundle** matching Playwright HTML reporter merge behavior, including `report.machines[]` shard metadata.
+- The **Report Summary** always includes Playwright-compatible `report.machines[]`; ordinary non-merged runs use an empty array.
+- When Playwright `merge-reports` replays blob reports into the **Runboard Reporter**, the reporter emits a **Merged Runboard Data Bundle** matching Playwright HTML reporter merge behavior, including populated `report.machines[]` shard metadata.
 - The **Runboard Data Contract** contains one **Report Summary** and one **Test File Entry** per source test file.
+- The **Report Summary** uses Playwright's lightweight summary shape, while each **Test File Entry** uses Playwright's full lazy-loaded file shape.
 - The **Runboard Data Contract** includes **Attachment Assets**, following Playwright HTML reporter behavior: path attachments are copied into the data bundle, text bodies may be inlined, stdout/stderr are represented as attachments, and traces/screenshots remain navigable by the Runboard.
 - The **Report Summary** includes a **Schema Version**, **Reporter Version**, and Playwright package version.
+- The Playwright package version in **Runboard Metadata** comes from Playwright's public `FullConfig.version` string for the reported run.
 - The first supported **Schema Version** is `1.0.0`; the **Reporter Version** may still be a `0.x` package version while the reporter implementation matures.
 - The **Schema Version Constant** is the single code-level source for `report.runboard.schemaVersion`.
 - The **Runboard Data Contract** preserves Playwright HTML reporter field names where possible; any **Runboard Extension** is namespaced away from Playwright-shaped fields.
@@ -196,19 +208,23 @@ _Avoid_: Research range, untested historical support
 - The **Error Catalog** contains 45 **Error Types** used to select reporter fixtures and lives at `docs/error-catalog/playwright-error-types.md`.
 - **Error Catalog Coverage** is required; the Runboard Reporter test suite must verify all 45 **Error Types** are represented by the Runboard Data Contract.
 - **Error Classification** belongs to the Runboard or analytics layer, not the Runboard Reporter.
-- **Structured Error Evidence** is emitted as a Runboard Extension alongside Playwright-compatible `errors[].message`.
+- **Structured Error Evidence** is emitted as a Runboard Extension alongside Playwright-compatible serialized display errors.
 - **Result Evidence** contains only `evidence: RunboardErrorEvidence[]` in the first Runboard Data Contract.
-- Each **Structured Error Evidence** entry corresponds by index to one Playwright-compatible `errors[]` display entry when **Result Evidence** exists.
+- Each **Structured Error Evidence** entry corresponds by index to one Playwright-compatible serialized `result.errors[]` display entry when **Result Evidence** exists, not to the raw public reporter API `TestResult.errors[]`.
 - **Structured Error Evidence** has `source: 'test-error'` when it comes from a Playwright `TestError`, and `source: 'status-derived'` when Playwright derives the failure from result or expected-status logic.
 - These `source` values are Runboard Data Contract provenance labels for Playwright `formatResultFailure()` branches; Playwright does not expose them as official labels.
 - Status-derived **Structured Error Evidence** includes a required `message`; test-error **Structured Error Evidence** preserves optional `message`, `stack`, `value`, `location`, `snippet`, `stepPath`, `stepCategory`, `attachmentIndexes`, and recursive `cause`.
 - The first Runboard Data Contract places Runboard Extensions only in **Runboard Metadata** and **Result Evidence**.
 - A **Compatibility Fixture** protects compatibility by comparing Runboard Reporter output to official Playwright HTML reporter data for the same run.
+- Compatibility comparisons are strict except for an explicit normalization allowlist: path roots, timestamps, durations, equivalent attachment hashes or paths, snippet/codeframe line-ending or root-path noise, and version/package metadata.
+- **Producer Contract Tests** prove the Runboard Reporter emits the **Runboard Data Contract**; the v1 reporter does not perform runtime schema validation before writing bundles.
+- Runtime validation of a **Runboard Data Bundle** belongs to the Runboard or ingestion layer when reading a bundle.
 - The **Reporter Fixture Suite** is development-only and excluded from the published Runboard Reporter package.
 - The **Compatibility Smoke Suite** runs in normal CI; the **Error Catalog Suite** remains available as a separate full-coverage check.
 - The **Public Serializer** is the default implementation strategy for producing the **Runboard Data Contract**.
 - A **Compatibility Adapter** may fill specific gaps when public Playwright reporter API data is insufficient, including Playwright's merged-report machine metadata hooks needed to match the HTML reporter.
 - The **Compatibility Rule** governs Runboard Reporter design decisions when the **HTML Report Data Parity Rule** cannot be followed exactly.
+- The in-repo PRD is canonical for the Runboard Reporter data-contract plan; GitHub Issues are canonical for implementation tracking and may link or mirror planning content.
 
 ## Example dialogue
 
@@ -220,4 +236,9 @@ _Avoid_: Research range, untested historical support
 - "reporter" can mean Playwright's official HTML reporter, Playwright's generic reporter API, or this package's **Runboard Reporter**. Use the specific term.
 - "same data" means **HTML Report Data** unless we explicitly decide to produce a smaller compatibility layer.
 - "TestCase" can mean Playwright's public runtime reporter API object, Playwright's private serialized HTML reporter data type, or the Runboard-owned serialized contract shape. Resolved: public package exports use **Runboard Contract Type** names such as `RunboardTestCase`.
+- "annotations" can mean Playwright's imported `TestAnnotation` type or a Runboard-owned serialized shape. Resolved: export a `RunboardTestAnnotation` structural type from the Contract Module.
+- "`errors[]`" can mean Playwright's raw public reporter API `TestResult.errors[]` or the serialized HTML-report display error array. Resolved: in the Runboard Data Contract, evidence aligns with the serialized `result.errors[]` display array.
+- "`report.machines[]`" can mean a merged-report-only concept or an always-present serialized field. Resolved: the field is always present; merged runs are the case where it contains machine metadata.
+- "dangerous directory" for **Output Folder** cleanup means an exact resolved-path match, not any parent/child overlap.
+- "canonical PRD" means `docs/prd/runboard-reporter-data-contract.md` for the data-contract plan; GitHub Issues are the implementation tracker.
 - The pasted catalog says "30 distinct error types" but enumerates 45. Resolved: the **Error Catalog** has 45 **Error Types**; the "30" wording is stale.

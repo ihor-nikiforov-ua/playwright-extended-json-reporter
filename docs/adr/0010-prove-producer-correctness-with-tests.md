@@ -1,0 +1,3 @@
+# Prove producer correctness with tests
+
+The v1 Runboard Reporter will not perform runtime schema validation before writing Runboard Data Bundle files; instead, Producer Contract Tests and Compatibility Fixtures must prove that emitted `report.json` and `<fileId>.json` entries match the Runboard Data Contract and Playwright HTML Report Data parity expectations. We choose tests as the producer-side proof to avoid adding a second runtime schema source inside the reporter, while runtime bundle validation remains the Runboard or ingestion layer's responsibility when reading stored, uploaded, or versioned bundles.

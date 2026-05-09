@@ -1,6 +1,6 @@
 # Issue tracker: GitHub
 
-Issues and PRDs for this repo live as GitHub issues for `ihor-nikiforov-ua/playwright-runboard-reporter`. Use the `gh` CLI for all operations.
+Issues for this repo live in GitHub Issues for `ihor-nikiforov-ua/playwright-runboard-reporter`. Use the `gh` CLI for issue operations. The canonical in-repo data-contract PRD lives at `docs/prd/runboard-reporter-data-contract.md`; GitHub Issues track implementation work and may link or mirror planning content.
 
 ## Conventions
 
