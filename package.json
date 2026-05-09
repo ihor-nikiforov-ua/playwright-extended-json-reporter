@@ -32,7 +32,8 @@
     "lint": "biome lint .",
     "prepare": "lefthook install",
     "prepack": "npm run build",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "test": "playwright test",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json"
   },
   "keywords": [
     "playwright",
@@ -46,7 +47,7 @@
     "node": ">=24"
   },
   "peerDependencies": {
-    "@playwright/test": ">=1.40.0"
+    "@playwright/test": ">=1.59 <2"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.14",
