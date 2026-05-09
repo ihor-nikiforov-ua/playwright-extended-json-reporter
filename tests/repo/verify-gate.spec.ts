@@ -15,17 +15,23 @@ test.describe('Canonical verify gate', () => {
     expect(pkg.scripts?.['verify'], 'package.json must define a `verify` script').toBeTruthy();
   });
 
-  test('`verify` runs Biome check, typecheck, tests, and pack verification', async () => {
+  test('`verify` runs Biome check, targeted ESLint, typecheck, tests, and pack verification', async () => {
     const pkg = await readPackageJson();
     const verify = pkg.scripts?.['verify'] ?? '';
-    for (const gate of ['npm run check', 'npm run typecheck', 'npm test', 'npm run pack:verify']) {
+    for (const gate of [
+      'npm run check',
+      'npm run lint',
+      'npm run typecheck',
+      'npm test',
+      'npm run pack:verify',
+    ]) {
       expect(verify, `\`verify\` must invoke \`${gate}\``).toContain(gate);
     }
   });
 
   test('focused scripts remain available for fast local checks', async () => {
     const pkg = await readPackageJson();
-    for (const focused of ['check', 'typecheck', 'test', 'pack:verify']) {
+    for (const focused of ['check', 'lint', 'typecheck', 'test', 'pack:verify']) {
       expect(
         pkg.scripts?.[focused],
         `\`${focused}\` script must remain runnable on its own`,
@@ -53,6 +59,7 @@ test.describe('Canonical verify gate', () => {
     expect(ciYml, 'CI must invoke the canonical verify gate').toContain('npm run verify');
     for (const inlineGate of [
       'npm run check',
+      'npm run lint',
       'npm run typecheck',
       'npm test',
       'npm pack --dry-run',
