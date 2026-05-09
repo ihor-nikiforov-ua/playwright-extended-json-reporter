@@ -40,6 +40,8 @@ export default defineConfig({
 
 ## Development
 
+Use the latest Node.js LTS release.
+
 ```sh
 npm install
 npm run build
