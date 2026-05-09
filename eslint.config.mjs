@@ -9,6 +9,12 @@ import { createTypeScriptImportResolver } from 'eslint-import-resolver-typescrip
 import importX from 'eslint-plugin-import-x';
 import tseslint from 'typescript-eslint';
 
+const PRIVATE_PLAYWRIGHT_BARE_PATHS = [
+  '@playwright/test/lib',
+  'playwright/lib',
+  'playwright-core/lib',
+];
+
 const PRIVATE_PLAYWRIGHT_PATTERNS = [
   '@playwright/test/lib/*',
   '@playwright/test/lib/**',
@@ -64,6 +70,10 @@ export default tseslint.config(
       'no-restricted-imports': [
         'error',
         {
+          paths: PRIVATE_PLAYWRIGHT_BARE_PATHS.map((name) => ({
+            name,
+            message: PRIVATE_PLAYWRIGHT_MESSAGE,
+          })),
           patterns: [
             {
               group: PRIVATE_PLAYWRIGHT_PATTERNS,

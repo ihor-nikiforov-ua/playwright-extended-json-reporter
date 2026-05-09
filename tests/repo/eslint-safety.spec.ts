@@ -115,6 +115,33 @@ test.describe('Targeted ESLint safety layer', () => {
     }
   });
 
+  test('private Playwright bare lib entrypoints are blocked', async () => {
+    // Regression test for Codex review of PR #22: nested patterns like
+    // `playwright/lib/*` and `playwright/lib/**` do not match the bare
+    // specifier `playwright/lib`, leaving an escape hatch around issue #15's
+    // private-internals boundary. Each bare specifier must trigger
+    // `no-restricted-imports`.
+    const eslint = new ESLint({ cwd: repoRoot });
+    const code = [
+      `import 'playwright/lib';`,
+      `import '@playwright/test/lib';`,
+      `import 'playwright-core/lib';`,
+      '',
+    ].join('\n');
+    const [result] = await eslint.lintText(code, {
+      filePath: resolve(repoRoot, 'src/runboard-reporter.ts'),
+    });
+    const restrictedMessages = (result?.messages ?? []).filter(
+      (m) => m.ruleId === 'no-restricted-imports',
+    );
+    for (const bare of ['playwright/lib', '@playwright/test/lib', 'playwright-core/lib']) {
+      expect(
+        restrictedMessages.some((m) => m.message.includes(`'${bare}'`)),
+        `bare specifier \`${bare}\` must be blocked by no-restricted-imports`,
+      ).toBe(true);
+    }
+  });
+
   test('repository-wide eslint run reports zero violations', async () => {
     const eslint = new ESLint({ cwd: repoRoot });
     const results = await eslint.lintFiles([
