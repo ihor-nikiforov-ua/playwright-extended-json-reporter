@@ -12,12 +12,12 @@ async function readPackageJson(): Promise<{ scripts?: Record<string, string> }> 
 test.describe('Canonical verify gate', () => {
   test('package.json defines a `verify` script', async () => {
     const pkg = await readPackageJson();
-    expect(pkg.scripts?.verify, 'package.json must define a `verify` script').toBeTruthy();
+    expect(pkg.scripts?.['verify'], 'package.json must define a `verify` script').toBeTruthy();
   });
 
   test('`verify` runs Biome check, typecheck, tests, and pack verification', async () => {
     const pkg = await readPackageJson();
-    const verify = pkg.scripts?.verify ?? '';
+    const verify = pkg.scripts?.['verify'] ?? '';
     for (const gate of ['npm run check', 'npm run typecheck', 'npm test', 'npm run pack:verify']) {
       expect(verify, `\`verify\` must invoke \`${gate}\``).toContain(gate);
     }

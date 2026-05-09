@@ -24,7 +24,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.build.json",
     "check": "biome check .",
     "check:staged:write": "biome check --write --staged --no-errors-on-unmatched",
     "check:write": "biome check --write .",
@@ -34,7 +34,7 @@
     "prepare": "lefthook install",
     "prepack": "npm run build",
     "test": "playwright test",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
+    "typecheck": "tsc --noEmit -p tsconfig.build.json && tsc --noEmit -p tsconfig.test.json && tsc --noEmit -p tsconfig.json",
     "verify": "npm run check && npm run typecheck && npm test && npm run pack:verify"
   },
   "keywords": [
