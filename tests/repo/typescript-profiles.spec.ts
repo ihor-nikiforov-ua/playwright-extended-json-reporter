@@ -1,9 +1,12 @@
+import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { expect, test } from '@playwright/test';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+const execFileAsync = promisify(execFile);
 
 async function readJson(relativePath: string): Promise<Record<string, unknown>> {
   return JSON.parse(await readFile(resolve(repoRoot, relativePath), 'utf8'));
@@ -16,6 +19,20 @@ async function readCompilerOptions(profilePath: string): Promise<CompilerOptions
   const options = json['compilerOptions'];
   expect(options, `${profilePath} must define compilerOptions`).toBeTruthy();
   return options as CompilerOptions;
+}
+
+async function readEffectiveCompilerOptions(profilePath: string): Promise<CompilerOptions> {
+  const { stdout } = await execFileAsync(
+    process.execPath,
+    [resolve(repoRoot, 'node_modules/typescript/bin/tsc'), '--showConfig', '-p', profilePath],
+    { cwd: repoRoot },
+  );
+  const json = JSON.parse(stdout) as { compilerOptions?: CompilerOptions };
+  expect(json.compilerOptions, `${profilePath} must resolve compilerOptions`).toBeTruthy();
+  if (!json.compilerOptions) {
+    throw new Error(`${profilePath} must resolve compilerOptions`);
+  }
+  return json.compilerOptions;
 }
 
 test.describe('TypeScript profiles', () => {
@@ -114,6 +131,43 @@ test.describe('TypeScript profiles', () => {
         entry.toLowerCase().includes('dom'),
         'base profile must not pull in DOM libraries unless explicitly justified',
       ).toBe(false);
+    }
+  });
+
+  test('DOM libs are limited to the documented Playwright reporter typing exception', async () => {
+    const adr = await readFile(
+      resolve(repoRoot, 'docs/adr/0011-allow-dom-types-for-playwright-reporter-typings.md'),
+      'utf8',
+    );
+    expect(adr, 'ADR must name the public reporter type chain that requires DOM').toContain(
+      '@playwright/test/reporter',
+    );
+    expect(adr, 'ADR must document the DOM library exception').toContain('DOM');
+    expect(adr, 'ADR must keep browser globals out of production source').toContain(
+      'browser globals',
+    );
+
+    for (const profile of ['tsconfig.build.json', 'tsconfig.test.json', 'tsconfig.json']) {
+      const options = await readEffectiveCompilerOptions(profile);
+      expect(options['lib'], `${profile} must keep the DOM exception narrow and explicit`).toEqual([
+        'es2024',
+        'dom',
+        'dom.iterable',
+      ]);
+    }
+
+    const productionSource = await Promise.all(
+      ['src/contract.ts', 'src/index.ts', 'src/runboard-reporter.ts'].map(async (path) => ({
+        path,
+        source: await readFile(resolve(repoRoot, path), 'utf8'),
+      })),
+    );
+    const disallowedBrowserGlobals = /\b(window|document|HTMLElement|SVGElement|NodeList)\b/;
+    for (const { path, source } of productionSource) {
+      expect(
+        source,
+        `${path} must not use browser globals even though Playwright types require DOM libs`,
+      ).not.toMatch(disallowedBrowserGlobals);
     }
   });
 
