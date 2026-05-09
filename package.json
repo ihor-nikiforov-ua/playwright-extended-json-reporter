@@ -30,7 +30,7 @@
     "check:write": "biome check --write .",
     "format": "biome format --write .",
     "lint": "biome lint .",
-    "pack:verify": "npm pack --dry-run",
+    "pack:verify": "npm run build && npm pack --dry-run --ignore-scripts",
     "prepare": "lefthook install",
     "prepack": "npm run build",
     "test": "playwright test",

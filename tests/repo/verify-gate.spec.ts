@@ -33,6 +33,21 @@ test.describe('Canonical verify gate', () => {
     }
   });
 
+  test('pack verification builds explicitly without running lifecycle scripts', async () => {
+    const pkg = await readPackageJson();
+    const packVerify = pkg.scripts?.['pack:verify'] ?? '';
+    expect(packVerify, '`pack:verify` must build package artifacts explicitly').toContain(
+      'npm run build',
+    );
+    expect(packVerify, '`pack:verify` must dry-run package contents').toContain(
+      'npm pack --dry-run',
+    );
+    expect(
+      packVerify,
+      '`pack:verify` must not run lifecycle scripts such as `prepare` hook installation',
+    ).toContain('--ignore-scripts');
+  });
+
   test('CI workflow runs `npm run verify` and does not duplicate gate steps inline', async () => {
     const ciYml = await readFile(resolve(repoRoot, '.github/workflows/ci.yml'), 'utf8');
     expect(ciYml, 'CI must invoke the canonical verify gate').toContain('npm run verify');
