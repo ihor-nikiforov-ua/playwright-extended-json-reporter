@@ -388,4 +388,51 @@ test.describe('Display Error Formatter — public boundary', () => {
     expect(errors[0]?.message).toContain('Test was interrupted.');
     expect(errors[1]?.message).toContain('underlying failure');
   });
+
+  test('multi-line error message (e.g. Call log) is not duplicated into the stack tail', () => {
+    // Catalog #2/#3/#5/#6 parity: action and wait-style timeout errors carry a
+    // multi-line `error.message` (the headline + a Call log block) that is
+    // also embedded as the leading lines of `error.stack` before the first
+    // `    at ` frame. Playwright HTML reporter parses the stack and drops
+    // every line up to the first frame so the Call log appears exactly once;
+    // the formatter must do the same so the Display Error doesn't render the
+    // Call log twice (once inside `error.message`, once in the stack tail).
+    const message =
+      'TimeoutError: locator.click: Timeout 100ms exceeded.\n' +
+      'Call log:\n' +
+      "  - waiting for locator('#missing')\n";
+    const stack =
+      `${message}\n` +
+      '    at /repo/tests/action.spec.ts:5:34\n' +
+      '    at TestRunner.run (/repo/lib/runner.js:1:1)';
+    const run = fakeRun({
+      rootDir: '/repo',
+      files: [
+        {
+          fileName: '/repo/tests/action.spec.ts',
+          tests: [
+            {
+              title: 'action times out',
+              status: 'failed',
+              expectedStatus: 'passed',
+              results: [{ status: 'failed', errors: [{ message, stack }] }],
+            },
+          ],
+        },
+      ],
+    });
+    const { test: t, result } = pickTestAndResult(run);
+
+    const [error] = formatDisplayErrors(t, result);
+    if (!error) throw new Error('expected Display Error');
+
+    expect(error.message).toContain("Call log:\n  - waiting for locator('#missing')");
+    expect(error.message).toContain('    at /repo/tests/action.spec.ts:5:34');
+    // The Call log lines must appear exactly once — the previous
+    // implementation only stripped the first stack line, so the rest of the
+    // multi-line message landed in the stack tail and Call log lines rendered
+    // twice.
+    const callLogOccurrences = error.message.split('Call log:').length - 1;
+    expect(callLogOccurrences).toBe(1);
+  });
 });

@@ -45,16 +45,17 @@ export function formatDisplayErrors(
 }
 
 function serializeDisplayError(error: TestError): RunboardTestResultDisplayError {
-  const tokens: string[] = [];
-  const baseMessage = error.message ?? error.value ?? '';
-  tokens.push(baseMessage);
+  const fallbackMessage = error.message ?? error.value ?? '';
+  const parsedStack = error.stack ? parseErrorStack(error.stack) : undefined;
+  const headlineMessage = parsedStack?.message || fallbackMessage;
+
+  const tokens: string[] = [headlineMessage];
   if (error.snippet !== undefined && error.snippet !== '') {
     tokens.push('');
     tokens.push(error.snippet);
   }
-  if (error.stack !== undefined && error.stack !== '') {
-    const stackLines = stripMessageLineFromStack(error.stack, baseMessage);
-    if (stackLines.length > 0) tokens.push(stackLines.join('\n'));
+  if (parsedStack && parsedStack.stackLines.length > 0) {
+    tokens.push(parsedStack.stackLines.join('\n'));
   }
   if (error.cause) {
     const cause = serializeDisplayError(error.cause);
@@ -69,13 +70,22 @@ function serializeDisplayError(error: TestError): RunboardTestResultDisplayError
   return out;
 }
 
-function stripMessageLineFromStack(stack: string, message: string): string[] {
+/**
+ * Mirrors Playwright HTML reporter's `parseErrorStack`: split the stack on
+ * newlines, locate the first frame line (`    at …`), and partition the stack
+ * into a leading message portion and the trailing frame lines. For Playwright
+ * action / wait timeouts, the leading portion is multi-line — it includes the
+ * Call log block — so a naive "drop the first stack line" approach would
+ * duplicate the Call log into the formatted Display Error message.
+ */
+function parseErrorStack(stack: string): { message: string; stackLines: string[] } {
   const lines = stack.split('\n');
-  const firstMessageLine = message.split('\n')[0];
-  if (firstMessageLine && lines[0]?.includes(firstMessageLine)) {
-    return lines.slice(1);
-  }
-  return lines;
+  const firstFrameIndex = lines.findIndex((line) => line.startsWith('    at '));
+  const splitAt = firstFrameIndex === -1 ? lines.length : firstFrameIndex;
+  return {
+    message: lines.slice(0, splitAt).join('\n'),
+    stackLines: lines.slice(splitAt),
+  };
 }
 
 /**
