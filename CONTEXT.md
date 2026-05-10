@@ -120,6 +120,10 @@ _Avoid_: Reporter support, reporter error typing
 A Result Evidence entry aligned to one serialized HTML-report display error, preserving structured failure details without assigning an Error Type in the Runboard Reporter.
 _Avoid_: Reporter classification, formatted-only error
 
+**Source Excerpt**:
+An optional structured source-code slice attached to Structured Error Evidence so Runboard can render its own codeframe without parsing Display Errors or reading source files.
+_Avoid_: Parsed codeframe, source file dependency, mandatory source dump
+
 **Runboard Metadata**:
 Runboard Extension data stored under `report.runboard`, containing exactly `schemaVersion`, `reporterVersion`, and `playwrightVersion` in the first Runboard Data Contract.
 _Avoid_: Unnamespaced metadata, top-level custom fields
@@ -128,6 +132,10 @@ _Avoid_: Unnamespaced metadata, top-level custom fields
 Runboard Extension data stored under `result.runboard`, containing an `evidence` array for one test result attempt.
 _Avoid_: Test-level custom fields, step-level custom fields
 
+**Display Error**:
+The Playwright-compatible human-facing failure entry stored in `result.errors[]`, containing formatted message text and optional codeframe data.
+_Avoid_: Error HTML, raw TestError, structured evidence
+
 **Compatibility Fixture**:
 A deliberately small Playwright test suite run through both the Runboard Reporter and Playwright's official HTML reporter to compare normalized generated data.
 _Avoid_: Reporter test, sample report
@@ -135,6 +143,10 @@ _Avoid_: Reporter test, sample report
 **Reporter Fixture Suite**:
 The package-internal Playwright tests used to verify the Runboard Reporter and Error Catalog Coverage; these fixtures are not part of the published package consumed by users.
 _Avoid_: User tests, Runboard app tests
+
+**Implementation Issue**:
+A GitHub Issue scoped so one focused coding session can complete and independently verify it.
+_Avoid_: Broad milestone issue, vague work item
 
 **Compatibility Smoke Suite**:
 A fast subset of the Reporter Fixture Suite that runs on normal CI to catch Runboard Data Contract regressions quickly.
@@ -147,6 +159,10 @@ _Avoid_: Normal smoke tests, consumer tests
 **Public Serializer**:
 The Runboard Reporter serialization layer built from Playwright's public reporter API objects.
 _Avoid_: HTML reporter fork, private serializer
+
+**Display Error Formatter**:
+A Runboard Reporter-owned formatter that produces Playwright-compatible Display Errors from public Playwright reporter API data.
+_Avoid_: Runtime private Playwright formatter import, raw error dump
 
 **Compatibility Adapter**:
 A narrow adapter used only when the public reporter API cannot reproduce a specific HTML Report Data field closely enough.
@@ -164,12 +180,20 @@ _Avoid_: Partial data subset, UI parity
 The Playwright version range the Runboard Reporter claims compatibility with for the HTML Report Data Parity Rule.
 _Avoid_: Research range, untested historical support
 
+**Runboard Reporter Quality Target**:
+The release-grade expectation that the Runboard Reporter proves producer correctness for every claimed Runboard Data Bundle behavior at a level comparable to Playwright's official HTML reporter.
+_Avoid_: Full HTML reporter feature parity, report-serving parity, UI parity
+
 ## Relationships
 
 - The **Runboard Reporter** emits a **Runboard Data Bundle** for one Playwright test run.
 - The **Runboard Reporter Package** is named `playwright-runboard-reporter` and exports `RunboardReporter`.
 - The GitHub repository has been renamed to match the **Runboard Reporter Package**.
 - The **HTML Report Data Parity Rule** governs the Runboard Reporter's data-shape target.
+- The **Runboard Reporter Quality Target** applies to the Runboard Reporter's producer behavior, not to rendered HTML, static assets, report serving, automatic opening, or Playwright JSON reporter output.
+- The **Runboard Reporter Quality Target** requires **Display Error** parity as a first-class producer behavior, not merely preservation of **Structured Error Evidence**.
+- A release-grade Runboard Reporter must prove **Display Error** parity across every **Error Type** in the **Error Catalog**, not only representative formatter families.
+- **Display Error** parity uses minimal normalization only for non-semantic environment noise; missing call logs, assertion diffs, codeframes, causes, screenshot/text diff signals, step or hook context, and status-derived messages are real parity failures.
 - The first **Playwright Support Range** is `@playwright/test >=1.59 <2`.
 - A Playwright minor version inside the **Playwright Support Range** is supported when Compatibility Fixtures pass for that version; parity breaks require an explicit support-range or adapter decision.
 - Playwright `1.40+` wording research informs the **Error Catalog**, but is not a support promise until compatibility fixtures prove it.
@@ -209,7 +233,13 @@ _Avoid_: Research range, untested historical support
 - **Error Catalog Coverage** is required; the Runboard Reporter test suite must verify all 45 **Error Types** are represented by the Runboard Data Contract.
 - **Error Classification** belongs to the Runboard or analytics layer, not the Runboard Reporter.
 - **Structured Error Evidence** is emitted as a Runboard Extension alongside Playwright-compatible serialized display errors.
+- **Source Excerpts** may enrich **Structured Error Evidence** when source snippets are enabled, while **Display Errors** remain the Playwright-compatible human display surface.
+- **Source Excerpts** live only inside **Structured Error Evidence** under `result.runboard.evidence[]`, not inside the Playwright-shaped **Display Error** fields.
+- A **Source Excerpt** contains a small focused source slice by default: two lines above the highlighted line, the highlighted line, and two lines below it, with root-relative file, start line, highlighted line, and highlighted column metadata.
+- `noSnippets: true` suppresses **Source Excerpts** as source-bearing output, matching its role as the source-snippet privacy and size control.
+- Adding optional **Source Excerpts** to **Structured Error Evidence** is a backward-compatible **Runboard Data Contract** expansion that should ship as Schema Version `1.1.0`.
 - **Result Evidence** contains only `evidence: RunboardErrorEvidence[]` in the first Runboard Data Contract.
+- A **Display Error** is the canonical Playwright-compatible display surface for one serialized failure; **Structured Error Evidence** is index-aligned enrichment and does not replace Display Error parity.
 - Each **Structured Error Evidence** entry corresponds by index to one Playwright-compatible serialized `result.errors[]` display entry when **Result Evidence** exists, not to the raw public reporter API `TestResult.errors[]`.
 - **Structured Error Evidence** has `source: 'test-error'` when it comes from a Playwright `TestError`, and `source: 'status-derived'` when Playwright derives the failure from result or expected-status logic.
 - These `source` values are Runboard Data Contract provenance labels for Playwright `formatResultFailure()` branches; Playwright does not expose them as official labels.
@@ -222,9 +252,12 @@ _Avoid_: Research range, untested historical support
 - The **Reporter Fixture Suite** is development-only and excluded from the published Runboard Reporter package.
 - The **Compatibility Smoke Suite** runs in normal CI; the **Error Catalog Suite** remains available as a separate full-coverage check.
 - The **Public Serializer** is the default implementation strategy for producing the **Runboard Data Contract**.
+- The **Display Error Formatter** must be implemented from public Playwright reporter API data by default; Playwright's official HTML reporter remains the test oracle, not a runtime dependency.
 - A **Compatibility Adapter** may fill specific gaps when public Playwright reporter API data is insufficient, including Playwright's merged-report machine metadata hooks needed to match the HTML reporter.
 - The **Compatibility Rule** governs Runboard Reporter design decisions when the **HTML Report Data Parity Rule** cannot be followed exactly.
 - The in-repo PRD is canonical for the Runboard Reporter data-contract plan; GitHub Issues are canonical for implementation tracking and may link or mirror planning content.
+- Broad quality milestones may be tracked as epics, but each **Implementation Issue** should be one-session sized and independently verifiable.
+- The canonical Display Error parity milestone lives at `docs/prd/display-error-parity.md`.
 
 ## Example dialogue
 
@@ -238,7 +271,11 @@ _Avoid_: Research range, untested historical support
 - "TestCase" can mean Playwright's public runtime reporter API object, Playwright's private serialized HTML reporter data type, or the Runboard-owned serialized contract shape. Resolved: public package exports use **Runboard Contract Type** names such as `RunboardTestCase`.
 - "annotations" can mean Playwright's imported `TestAnnotation` type or a Runboard-owned serialized shape. Resolved: export a `RunboardTestAnnotation` structural type from the Contract Module.
 - "`errors[]`" can mean Playwright's raw public reporter API `TestResult.errors[]` or the serialized HTML-report display error array. Resolved: in the Runboard Data Contract, evidence aligns with the serialized `result.errors[]` display array.
+- "evidence can reconstruct the error UI" is too broad. Resolved: **Display Errors** are the Playwright-compatible human display contract, while **Structured Error Evidence** enriches them for Runboard classification, linking, grouping, and history.
+- "evidence has everything to reconstruct codeframes" was too broad. Resolved: **Source Excerpts** are the optional structured field needed for Runboard-native codeframe rendering.
+- "use Playwright internals for error formatting" is too broad for a published package. Resolved: **Display Error Formatter** is repo-owned and public-API-based by default; runtime private internals require a separate explicit decision.
 - "`report.machines[]`" can mean a merged-report-only concept or an always-present serialized field. Resolved: the field is always present; merged runs are the case where it contains machine metadata.
 - "dangerous directory" for **Output Folder** cleanup means an exact resolved-path match, not any parent/child overlap.
 - "canonical PRD" means `docs/prd/runboard-reporter-data-contract.md` for the data-contract plan; GitHub Issues are the implementation tracker.
 - The pasted catalog says "30 distinct error types" but enumerates 45. Resolved: the **Error Catalog** has 45 **Error Types**; the "30" wording is stale.
+- "same level of software quality as Playwright's official HTML reporter" means the **Runboard Reporter Quality Target**, not full Playwright HTML reporter feature parity or Playwright JSON reporter compatibility.
