@@ -19,10 +19,18 @@ export interface FakeTestSpec {
   outcome?: ReturnType<TestCase['outcome']>;
 }
 
+export interface FakeProjectSpec {
+  name?: string;
+  testDir?: string;
+  outputDir?: string;
+}
+
 export interface FakeRunSpec {
   rootDir: string;
   playwrightVersion?: string;
   projectName?: string;
+  configFile?: string;
+  projects?: FakeProjectSpec[];
   files?: FakeFileSpec[];
 }
 
@@ -33,35 +41,55 @@ export interface FakeRun {
 }
 
 export function fakeRun(spec: FakeRunSpec): FakeRun {
-  const projectName = spec.projectName ?? 'chromium';
-  const project = { name: projectName } as unknown as FullProject;
+  const projectSpecs: FakeProjectSpec[] =
+    spec.projects ?? (spec.projectName !== undefined ? [{ name: spec.projectName }] : [{}]);
+
+  const fullProjects: FullProject[] = projectSpecs.map(
+    (p) =>
+      ({
+        name: p.name ?? 'chromium',
+        testDir: p.testDir ?? spec.rootDir,
+        outputDir: p.outputDir ?? `${spec.rootDir}/test-results`,
+      }) as unknown as FullProject,
+  );
+
   const config = {
     rootDir: spec.rootDir,
     version: spec.playwrightVersion ?? '1.59.0',
+    projects: fullProjects,
+    ...(spec.configFile !== undefined ? { configFile: spec.configFile } : {}),
   } as unknown as FullConfig;
 
   const rootSuite = createSuite('', 'root', undefined);
-  const projectSuite = createSuite(projectName, 'project', rootSuite, project);
-  rootSuite.suites.push(projectSuite);
+  const projectSuites = fullProjects.map((project) =>
+    createSuite(project.name, 'project', rootSuite, project),
+  );
+  for (const projectSuite of projectSuites) {
+    rootSuite.suites.push(projectSuite);
+  }
 
   const testResults: Array<{ test: TestCase; result: TestResult }> = [];
 
-  for (const file of spec.files ?? []) {
-    const fileSuite = createSuite(file.fileName, 'file', projectSuite, project, {
-      file: file.fileName,
-      line: 1,
-      column: 1,
-    });
-    projectSuite.suites.push(fileSuite);
+  const [primaryProjectSuite] = projectSuites;
+  const [primaryProject] = fullProjects;
+  if (primaryProjectSuite && primaryProject) {
+    for (const file of spec.files ?? []) {
+      const fileSuite = createSuite(file.fileName, 'file', primaryProjectSuite, primaryProject, {
+        file: file.fileName,
+        line: 1,
+        column: 1,
+      });
+      primaryProjectSuite.suites.push(fileSuite);
 
-    for (const [index, testSpec] of file.tests.entries()) {
-      const test = createTestCase(testSpec, fileSuite, file.fileName, index);
-      fileSuite.tests.push(test);
-      const [primaryResult] = test.results;
-      if (!primaryResult) {
-        throw new Error('createTestCase must seed the test with a primary result');
+      for (const [index, testSpec] of file.tests.entries()) {
+        const test = createTestCase(testSpec, fileSuite, file.fileName, index);
+        fileSuite.tests.push(test);
+        const [primaryResult] = test.results;
+        if (!primaryResult) {
+          throw new Error('createTestCase must seed the test with a primary result');
+        }
+        testResults.push({ test, result: primaryResult });
       }
-      testResults.push({ test, result: primaryResult });
     }
   }
 

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type {
@@ -11,22 +11,35 @@ import type {
   TestError,
 } from '@playwright/test/reporter';
 import {
+  assertOutputFolderSafe,
+  clearOutputFolder,
+  collectForbiddenPaths,
+  collectProjectArtifactDirs,
+  detectOutputFolderOverlaps,
+} from './cleanup.js';
+import {
   RUNBOARD_SCHEMA_VERSION,
   type RunboardMetadata,
   type RunboardReport,
+  type RunboardReportOptions,
   type RunboardStats,
   type RunboardTestFile,
   type RunboardTestFileSummary,
 } from './contract.js';
+import {
+  type NoOpCompatibilityOptionName,
+  type RunboardReporterOptions,
+  resolveRunboardOptions,
+} from './options.js';
 
-export interface RunboardReporterOptions {
-  outputFolder?: string;
-}
+export type { RunboardReporterOptions } from './options.js';
 
-const DEFAULT_OUTPUT_FOLDER = 'playwright-runboard-report';
+const RUNBOARD_LOG_PREFIX = 'playwright-runboard-reporter:';
 
 export class RunboardReporter implements Reporter {
   private readonly outputFolder: string;
+  private readonly reportOptions: RunboardReportOptions;
+  private readonly noOpOptionsToWarn: NoOpCompatibilityOptionName[];
   private playwrightVersion = '';
   private configMetadata: Record<string, unknown> = {};
   private projectNames: string[] = [];
@@ -36,10 +49,10 @@ export class RunboardReporter implements Reporter {
   private readonly topLevelErrors: TestError[] = [];
 
   constructor(options: RunboardReporterOptions = {}) {
-    this.outputFolder =
-      options.outputFolder ??
-      process.env['PLAYWRIGHT_RUNBOARD_OUTPUT_DIR'] ??
-      DEFAULT_OUTPUT_FOLDER;
+    const resolved = resolveRunboardOptions(options);
+    this.outputFolder = resolved.outputFolder;
+    this.reportOptions = resolved.reportOptions;
+    this.noOpOptionsToWarn = [...resolved.noOpOptionsSupplied];
   }
 
   printsToStdio(): boolean {
@@ -56,6 +69,24 @@ export class RunboardReporter implements Reporter {
     this.projectNames = suite.suites.map((projectSuite) => projectSuite.project()?.name ?? '');
     this.rootDir = config.rootDir;
     this.rootSuite = suite;
+
+    while (this.noOpOptionsToWarn.length > 0) {
+      const name = this.noOpOptionsToWarn.shift();
+      console.warn(
+        `${RUNBOARD_LOG_PREFIX} '${name}' is a Playwright HTML reporter option and is ignored; this reporter emits a Runboard Data Bundle and does not render, serve, or open HTML.`,
+      );
+    }
+
+    const forbidden = collectForbiddenPaths(config);
+    assertOutputFolderSafe(this.outputFolder, forbidden);
+
+    const projectArtifactDirs = collectProjectArtifactDirs(config);
+    const overlaps = detectOutputFolderOverlaps(this.outputFolder, projectArtifactDirs);
+    for (const overlap of overlaps) {
+      console.warn(
+        `${RUNBOARD_LOG_PREFIX} Output Folder '${resolve(this.outputFolder)}' overlaps with Playwright test artifact directory '${overlap}'.`,
+      );
+    }
 
     for (const projectSuite of suite.suites) {
       for (const fileSuite of projectSuite.suites) {
@@ -74,7 +105,7 @@ export class RunboardReporter implements Reporter {
 
   async onEnd(result: FullResult): Promise<void> {
     const outputFolder = resolve(this.outputFolder);
-    await mkdir(outputFolder, { recursive: true });
+    await clearOutputFolder(outputFolder);
 
     const reporterVersion = await readReporterVersion();
     const runboard: RunboardMetadata = {
@@ -110,7 +141,7 @@ export class RunboardReporter implements Reporter {
       projectNames: this.projectNames,
       stats: aggregateStats,
       errors: this.topLevelErrors.map(formatTopLevelError),
-      options: {},
+      options: this.reportOptions,
       machines: [],
     };
 
