@@ -84,3 +84,52 @@ When the public Playwright reporter API cannot reproduce a specific HTML
 Report Data field closely enough, a narrow Compatibility Adapter is added.
 These adapters are scoped to the Runboard Reporter and documented in the
 maintainer plan rather than in public docs.
+
+## Sharded runs
+
+Playwright supports running tests in parallel across shards by passing
+`--shard=<index>/<total>`. Each shard is an independent Playwright
+invocation, so wiring the Runboard Reporter into the matrix jobs directly
+would produce one Runboard Data Bundle per shard rather than one bundle for
+the whole run.
+
+Use Playwright's `blob` reporter on the shard jobs and replay the blobs
+through `playwright merge-reports` with the Runboard Reporter on a single
+merge job. The merge step emits one Merged Runboard Data Bundle whose
+`report.machines[]` is populated with the per-shard metadata, matching
+Playwright HTML reporter merge behavior.
+
+1. On each shard job, run Playwright with the `blob` reporter and upload
+   the produced blob directory as a CI artifact:
+
+   ```ts
+   // playwright.config.ts (shard job)
+   import { defineConfig } from '@playwright/test';
+
+   export default defineConfig({
+     reporter: process.env.CI ? [['blob']] : [['list']],
+   });
+   ```
+
+   ```sh
+   npx playwright test --shard=${MATRIX_INDEX}/${MATRIX_TOTAL}
+   ```
+
+2. On a single merge job, download every shard's blob artifact into one
+   directory and replay them through `merge-reports`, wiring
+   `playwright-runboard-reporter` as the merge reporter:
+
+   ```sh
+   npx playwright merge-reports \
+     --reporter playwright-runboard-reporter \
+     ./all-blobs
+   ```
+
+   This emits the Merged Runboard Data Bundle in the default Output Folder.
+   Upload the merged bundle as a single artifact using the
+   [CI artifact](./options.md#ci-artifact) snippet from the options page.
+
+Sharded matrices that do not use `merge-reports` still emit per-shard
+Runboard Data Bundles, but `report.machines[]` will be empty for each
+because the shards never see one another. Use merge-reports whenever you
+need one bundle per run.
