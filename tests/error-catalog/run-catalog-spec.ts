@@ -10,10 +10,22 @@
  * `dist/runboard-reporter.js` reporter, and parses `report.json` plus the
  * per-file shards. A `chromium` project is wired in only for fixtures that need
  * a real browser, so non-browser cases keep their startup overhead minimal.
+ *
+ * `runCatalogDisplayErrorParity` adds the Display Error parity comparator on
+ * top of the harness: it runs one fixture through both the Runboard Reporter
+ * and Playwright's official HTML reporter, then narrows the diff stream to
+ * `result.errors[]` and labels each entry with the catalog row metadata.
  */
 import { execFileSync } from 'node:child_process';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
+import {
+  type CatalogDisplayErrorDifference,
+  type CompatibilityRun,
+  compareCatalogDisplayErrors,
+  runCompatibilityFixture,
+} from '../harness/compatibility-fixture.js';
+import type { ErrorCatalogFixture } from './fixtures.js';
 
 export interface CatalogSpecOptions {
   /** Disposable temp directory the helper owns. The caller cleans it up. */
@@ -116,6 +128,58 @@ export async function runCatalogSpec(options: CatalogSpecOptions): Promise<Catal
 export interface CatalogResultView {
   result: Record<string, unknown>;
   topLevelErrors: string[];
+}
+
+export interface RunCatalogDisplayErrorParityOptions {
+  /**
+   * Disposable temp directory the helper owns. The harness writes the
+   * Playwright config, spec files, and both reporter outputs underneath it.
+   */
+  workDir: string;
+  /** Built `dist/runboard-reporter.js` path. */
+  reporterDist: string;
+  /** Catalog fixture (id, error type, spec source, browser hint, …). */
+  fixture: ErrorCatalogFixture;
+}
+
+export interface CatalogDisplayErrorParityResult {
+  run: CompatibilityRun;
+  diffs: CatalogDisplayErrorDifference[];
+}
+
+/**
+ * Runs one Error Catalog fixture through both the Runboard Reporter and
+ * Playwright's official HTML reporter, then returns the focused Display Error
+ * comparator output. Each diff is enriched with the fixture's catalog ID and
+ * Error Type label so failure messages quote the row to act on.
+ *
+ * To exercise a single catalog ID locally without scripting:
+ * ```sh
+ * npx playwright test --config=playwright.catalog.config.ts \
+ *   --grep "Display Error parity.*45\\. test\\.fail"
+ * ```
+ * Playwright's `--grep` matches against the full test path, so include enough
+ * of the suite name and Error Type label to disambiguate short numeric IDs.
+ */
+export async function runCatalogDisplayErrorParity(
+  options: RunCatalogDisplayErrorParityOptions,
+): Promise<CatalogDisplayErrorParityResult> {
+  const { workDir, reporterDist, fixture } = options;
+  const run = await runCompatibilityFixture({
+    workDir,
+    reporterDist,
+    specs: { 'fixture.spec.ts': fixture.spec },
+    expectFailingSuite: true,
+    ...(fixture.needsBrowser !== undefined ? { needsBrowser: fixture.needsBrowser } : {}),
+    ...(fixture.extraConfigLines !== undefined
+      ? { extraConfigLines: fixture.extraConfigLines }
+      : {}),
+  });
+  const diffs = compareCatalogDisplayErrors(run, {
+    catalogId: fixture.id,
+    errorType: fixture.errorType,
+  });
+  return { run, diffs };
 }
 
 /**

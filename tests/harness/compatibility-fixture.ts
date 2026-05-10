@@ -227,6 +227,152 @@ export function formatDifferences(diffs: CompatibilityDifference[]): string {
     .join('\n');
 }
 
+/**
+ * Catalog metadata supplied alongside a {@link CompatibilityRun} so the focused
+ * Display Error parity comparator can label each diff with the catalog row it
+ * belongs to. Issue #32 requires the comparator output to name the catalog ID
+ * and Error Type so an AFK agent can act on a single failure.
+ */
+export interface CatalogDisplayErrorFixtureContext {
+  catalogId: number;
+  errorType: string;
+}
+
+/**
+ * One Display Error parity mismatch, scoped to a specific Error Catalog
+ * fixture, test file, per-result attempt, and per-error index inside
+ * `result.errors[]`. The `path` field names the field within the Display Error
+ * object that diverged (e.g. `message`, `codeframe`, or a nested object key).
+ */
+export interface CatalogDisplayErrorDifference {
+  catalogId: number;
+  errorType: string;
+  testFile: string;
+  testTitle: string;
+  resultIndex: number;
+  errorIndex: number;
+  path: string;
+  expected: unknown;
+  actual: unknown;
+}
+
+/**
+ * Compares the Playwright HTML reporter and Runboard Reporter Display Error
+ * surfaces for a Compatibility Run, restricted to `result.errors[]`. Returns
+ * one entry per divergent field, enriched with the catalog ID and Error Type
+ * so the failure message can name the row that needs work. Normalization is
+ * the same minimal allowlist used by {@link compareCompatibility}: temp/root
+ * paths, timestamps, durations, line endings, and equivalent attachment
+ * paths. Every other signal — call logs, assertion diffs, codeframes, causes,
+ * screenshot/text diff signals, step or hook context, and status-derived
+ * messages — surfaces as a real diff.
+ */
+export function compareCatalogDisplayErrors(
+  run: CompatibilityRun,
+  fixture: CatalogDisplayErrorFixtureContext,
+): CatalogDisplayErrorDifference[] {
+  const baseUrl = run.attachmentsBaseURL ?? DEFAULT_ATTACHMENTS_BASE_URL;
+  const attachmentPathPattern = buildAttachmentPathPattern(baseUrl);
+  const htmlContext: NormalizeContext = {
+    rootDir: run.rootDir,
+    attachments: run.htmlAttachments,
+    attachmentPathPattern,
+  };
+  const runboardContext: NormalizeContext = {
+    rootDir: run.rootDir,
+    attachments: run.runboardAttachments,
+    attachmentPathPattern,
+  };
+
+  const out: CatalogDisplayErrorDifference[] = [];
+  const fileIds = new Set<string>([...run.htmlFiles.keys(), ...run.runboardFiles.keys()]);
+  for (const fileId of [...fileIds].sort()) {
+    const htmlFile = run.htmlFiles.get(fileId);
+    const runboardFile = run.runboardFiles.get(fileId);
+    // Missing-file-shard divergence is a structural concern surfaced by the
+    // full comparator; the focused Display Error comparator only acts when
+    // both sides serialize the same shard.
+    if (!htmlFile || !runboardFile) continue;
+    const fileName =
+      (htmlFile['fileName'] as string | undefined) ??
+      (runboardFile['fileName'] as string | undefined) ??
+      '';
+    const htmlTests = (htmlFile['tests'] as Array<Record<string, unknown>> | undefined) ?? [];
+    const runboardTests =
+      (runboardFile['tests'] as Array<Record<string, unknown>> | undefined) ?? [];
+    const testCount = Math.max(htmlTests.length, runboardTests.length);
+    for (let testIdx = 0; testIdx < testCount; testIdx++) {
+      const htmlTest = htmlTests[testIdx];
+      const runboardTest = runboardTests[testIdx];
+      if (!htmlTest || !runboardTest) continue;
+      const testTitle =
+        (htmlTest['title'] as string | undefined) ??
+        (runboardTest['title'] as string | undefined) ??
+        '';
+      const htmlResults = (htmlTest['results'] as Array<Record<string, unknown>> | undefined) ?? [];
+      const runboardResults =
+        (runboardTest['results'] as Array<Record<string, unknown>> | undefined) ?? [];
+      const resultCount = Math.max(htmlResults.length, runboardResults.length);
+      for (let resultIdx = 0; resultIdx < resultCount; resultIdx++) {
+        const htmlResult = htmlResults[resultIdx];
+        const runboardResult = runboardResults[resultIdx];
+        const htmlErrors =
+          (htmlResult?.['errors'] as Array<Record<string, unknown>> | undefined) ?? [];
+        const runboardErrors =
+          (runboardResult?.['errors'] as Array<Record<string, unknown>> | undefined) ?? [];
+        const errorCount = Math.max(htmlErrors.length, runboardErrors.length);
+        for (let errIdx = 0; errIdx < errorCount; errIdx++) {
+          const htmlError = htmlErrors[errIdx];
+          const runboardError = runboardErrors[errIdx];
+          const normHtml =
+            htmlError === undefined ? undefined : normalizeNode(htmlError, '', htmlContext);
+          const normRunboard =
+            runboardError === undefined
+              ? undefined
+              : normalizeNode(runboardError, '', runboardContext);
+          const localDiffs: CompatibilityDifference[] = [];
+          if (normHtml === undefined || normRunboard === undefined) {
+            localDiffs.push({ path: '', expected: normHtml, actual: normRunboard });
+          } else {
+            diffValues('', normHtml, normRunboard, localDiffs);
+          }
+          for (const d of localDiffs) {
+            out.push({
+              catalogId: fixture.catalogId,
+              errorType: fixture.errorType,
+              testFile: fileName,
+              testTitle,
+              resultIndex: resultIdx,
+              errorIndex: errIdx,
+              path: d.path.startsWith('/') ? d.path.slice(1) : d.path,
+              expected: d.expected,
+              actual: d.actual,
+            });
+          }
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Renders {@link compareCatalogDisplayErrors} output as actionable text. Each
+ * line names the catalog ID, Error Type, test file, per-result index, per-
+ * error index, and divergent field path so an AFK agent can grep for a single
+ * row, switch to the matching fixture, and run it locally.
+ */
+export function formatCatalogDisplayErrorDifferences(
+  diffs: readonly CatalogDisplayErrorDifference[],
+): string {
+  return diffs
+    .map((d) => {
+      const header = `Catalog #${d.catalogId} (${d.errorType}) — ${d.testFile} > ${d.testTitle} > result[${d.resultIndex}] > errors[${d.errorIndex}]${d.path ? ` > ${d.path}` : ''}`;
+      return `${header}\n  expected: ${formatValue(d.expected)}\n  actual:   ${formatValue(d.actual)}`;
+    })
+    .join('\n');
+}
+
 function formatValue(v: unknown): string {
   if (v === undefined) return '<missing>';
   return JSON.stringify(v);
@@ -434,12 +580,34 @@ export interface RunCompatibilityFixtureOptions {
    * so the comparator and evidence assertions remain meaningful.
    */
   expectFailingSuite?: boolean;
+  /**
+   * Wires a chromium browser project into the inner Playwright config. Most
+   * Error Catalog fixtures need a real browser to surface their distinguishing
+   * Display Error wording (e.g. action timeouts, locator failures); only the
+   * pure-runner cases (`expect()` matchers, hooks) can opt out.
+   */
+  needsBrowser?: boolean;
+  /**
+   * Extra top-level keys appended to the inner `defineConfig({...})` body.
+   * Mirrors the catalog runner so a single fixture can pin `globalTimeout`,
+   * `timeout`, or other Playwright config knobs without leaking them into the
+   * spec source.
+   */
+  extraConfigLines?: readonly string[];
 }
 
 export async function runCompatibilityFixture(
   options: RunCompatibilityFixtureOptions,
 ): Promise<CompatibilityRun> {
-  const { workDir, reporterDist, specs, attachmentsBaseURL, expectFailingSuite } = options;
+  const {
+    workDir,
+    reporterDist,
+    specs,
+    attachmentsBaseURL,
+    expectFailingSuite,
+    needsBrowser = false,
+    extraConfigLines = [],
+  } = options;
   const specsDir = join(workDir, 'specs');
   const runboardOutputDir = join(workDir, 'runboard-bundle');
   const htmlOutputDir = join(workDir, 'html-bundle');
@@ -470,18 +638,28 @@ export async function runCompatibilityFixture(
     noSnippets: true,
     ...(attachmentsBaseURL !== undefined ? { attachmentsBaseURL } : {}),
   });
+  const browserImports = needsBrowser
+    ? `import { defineConfig, devices } from '@playwright/test';`
+    : `import { defineConfig } from '@playwright/test';`;
+  const projectsLine = needsBrowser
+    ? `  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],`
+    : '';
   const configSource = [
-    `import { defineConfig } from '@playwright/test';`,
+    browserImports,
     `export default defineConfig({`,
     `  testDir: ${JSON.stringify(specsDir)},`,
     `  fullyParallel: false,`,
+    ...extraConfigLines.map((line) => `  ${line}`),
     `  reporter: [`,
     `    [${JSON.stringify(reporterDist)}, ${reporterOptions}],`,
     `    ['html', ${htmlOptions}],`,
     `  ],`,
+    projectsLine,
     `});`,
     '',
-  ].join('\n');
+  ]
+    .filter((line) => line !== '')
+    .join('\n');
   await writeFile(configPath, configSource, 'utf8');
 
   const pkgRoot = resolve(dirname(reporterDist), '..');
