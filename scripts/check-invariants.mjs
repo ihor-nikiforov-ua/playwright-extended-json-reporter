@@ -173,7 +173,7 @@ async function checkCiUsesNvmrc(repoRoot) {
 
 const EXPECTED_EXPORT_TYPES = './dist/index.d.ts';
 const EXPECTED_EXPORT_IMPORT = './dist/index.js';
-const EXPECTED_FILES_ALLOWLIST = ['dist', 'README.md', 'LICENSE', 'CHANGELOG.md'];
+const EXPECTED_FILES_ALLOWLIST = ['dist', 'docs/public', 'README.md', 'LICENSE', 'CHANGELOG.md'];
 const REQUIRED_GITIGNORE_PATTERNS = [
   'node_modules/',
   'dist/',

@@ -41,7 +41,7 @@ test.describe('Compatibility Fixture — Playwright merge-reports', () => {
   let workDir: string;
 
   test.beforeAll(async () => {
-    reporterSnapshotRoot = await mkdtemp(join(repoRoot, '.runboard-merge-snapshot-'));
+    reporterSnapshotRoot = await mkdtemp(join(repoRoot, '.runboard-compat-merge-snapshot-'));
     const snapshotDistDir = join(reporterSnapshotRoot, 'dist');
     execFileSync('npx', ['tsc', '-p', 'tsconfig.build.json', '--outDir', snapshotDistDir], {
       cwd: repoRoot,
@@ -59,7 +59,7 @@ test.describe('Compatibility Fixture — Playwright merge-reports', () => {
   });
 
   test.beforeEach(async () => {
-    workDir = await mkdtemp(join(repoRoot, '.runboard-merge-compat-'));
+    workDir = await mkdtemp(join(repoRoot, '.runboard-compat-merge-'));
   });
 
   test.afterEach(async () => {
