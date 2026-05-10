@@ -39,8 +39,37 @@ even when Runboard itself is not deployed. See
 
 ## Install
 
+`playwright-runboard-reporter` is in **Pre-NPM Release** posture: every
+release ships as a versioned GitHub Release with an `npm pack` tarball
+attached as the Release Artifact, and the package is **not yet** published
+to the npm registry. The current install path consumes that tarball
+directly.
+
+Pin a tagged Pre-NPM Release tarball (recommended):
+
 ```sh
-npm install --save-dev playwright-runboard-reporter
+npm install --save-dev \
+  https://github.com/ihor-nikiforov-ua/playwright-runboard-reporter/releases/download/v0.Y.Z/playwright-runboard-reporter-0.Y.Z.tgz
+```
+
+Or install straight from the git repository at a Release Tag:
+
+```sh
+npm install --save-dev \
+  github:ihor-nikiforov-ua/playwright-runboard-reporter#v0.Y.Z
+```
+
+Replace `v0.Y.Z` with the version listed under
+[`CHANGELOG.md`](./CHANGELOG.md) and on the GitHub Releases page. See
+[Release Process](./docs/public/release-process.md) for the full Pre-NPM
+Release flow.
+
+Once npm publishing lands (currently **deferred** — see
+[Release Process](./docs/public/release-process.md#npm-publishing-deferred)),
+the install path will become a plain `npm install`:
+
+```sh
+npm install --save-dev playwright-runboard-reporter  # future, after npm publishing is enabled
 ```
 
 The package declares Playwright as a peer dependency: `@playwright/test

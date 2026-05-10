@@ -119,3 +119,28 @@ Forward-looking migration notes are added in the same Release PR that ships
 a Schema Version change. Breaking changes to the Schema Version follow
 semver: the major bump is the public signal, and this page documents the
 migration path before the release ships.
+
+## Contract Stability Matrix
+
+The Contract Stability Matrix separates the Runboard Reporter's consumer
+surfaces by how strong a stability promise the package makes about them.
+"Stable" here means stability under the Public Preview Release posture in
+[Release Process](./release-process.md): breaking changes follow semver and
+are called out in [`CHANGELOG.md`](../../CHANGELOG.md) before the release
+ships.
+
+| Surface                                                                                       | Category                  | Stability promise |
+| --------------------------------------------------------------------------------------------- | ------------------------- | ----------------- |
+| `RunboardReporter` default and named exports                                                  | Stable public promise     | Breaking changes follow semver and are documented in [`CHANGELOG.md`](../../CHANGELOG.md). |
+| `RunboardReporterOptions` and documented [Options and Environment Variables](./options.md)    | Stable public promise     | Defaults, names, and precedence are documented; option removal or rename is a breaking package-API change. |
+| `RUNBOARD_SCHEMA_VERSION` and Runboard Contract Types ([API Reference](./api.md))             | Stable public promise     | Breaking type-shape changes follow semver on the package version. |
+| `report.json` and `<fileId>.json` field shapes (Playwright HTML Report Data parity)           | Schema-versioned          | Governed by `report.runboard.schemaVersion`; changes follow Schema Version semver, not package semver. |
+| Runboard Extensions under `report.runboard` and `result.runboard`                             | Schema-versioned          | Same schema-version semver as the JSON contract; additive fields land in minor bumps, breaking changes in majors. |
+| Source Excerpts (`result.runboard.evidence[].sourceExcerpt`)                                  | Preview                   | Stable shape under schema `1.1.0`; treated as a preview area because the surrounding Structured Error Evidence may evolve before the broader Runboard ecosystem reaches `1.0`. |
+| Anything inside `dist/` not re-exported from `src/index.ts`                                   | Internal (no promise)     | Not part of the contract; may change at any time without notice. |
+| Maintainer plans under `docs/prd/`, `docs/adr/`, repository configuration, tests, fixtures    | Internal (no promise)     | Excluded from the packed package and not part of the public surface. |
+
+The Contract Stability Matrix governs intent. The
+[API Reference](./api.md) lists the exact stable export names, and the
+sections above on Output layout, Report Summary, Test File Entry, and
+Runboard extensions describe the schema-versioned JSON shape.

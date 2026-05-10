@@ -102,6 +102,21 @@ test.describe('README landing page content', () => {
       );
     }
   });
+
+  test('documents the current Pre-NPM install path and marks npm install as deferred', async () => {
+    const readme = await readReadme();
+    expect(
+      readme,
+      'README must point at the GitHub Release artifact while npm publishing is deferred',
+    ).toMatch(/GitHub Release/);
+    expect(
+      readme,
+      'README must reference the Release Process page for the Pre-NPM install path',
+    ).toMatch(/\]\(\.?\/?docs\/public\/release-process\.md\)/);
+    expect(readme, 'README must mark npm install as deferred until npm publishing exists').toMatch(
+      /npm install[^\n]*\b(?:deferred|future|after npm publishing|not yet)\b/i,
+    );
+  });
 });
 
 const SPINE_FILES = [
@@ -124,6 +139,7 @@ const SPINE_FILES = [
       '## Runboard extensions',
       '## Schema versioning',
       '## Migration notes',
+      '## Contract Stability Matrix',
     ],
   },
   {
@@ -176,6 +192,43 @@ test.describe('docs/public/ documentation spine', () => {
       }
     });
   }
+
+  test('Support Matrix describes declaration compatibility as planned policy, not an existing gate', async () => {
+    const content = await readFile(resolve(repoRoot, 'docs/public/support-matrix.md'), 'utf8');
+    const tsHeader = '## TypeScript declaration compatibility';
+    const tsIndex = content.indexOf(tsHeader);
+    expect(tsIndex, 'support-matrix.md must contain the TypeScript section').toBeGreaterThan(-1);
+    const tsSection = content.slice(tsIndex);
+    expect(
+      tsSection,
+      'TypeScript section must NOT claim a declaration compatibility gate currently exists',
+    ).not.toMatch(/\bgate\b[^.]*\bconsumes\b/i);
+    expect(
+      tsSection,
+      'TypeScript section must mark declaration compatibility as planned/policy until the gate exists',
+    ).toMatch(/\b(?:planned|policy|future|not yet|will)\b/i);
+  });
+
+  test('Contract Stability Matrix distinguishes the four documented surface categories', async () => {
+    const content = await readFile(resolve(repoRoot, 'docs/public/data-contract.md'), 'utf8');
+    const matrixIndex = content.indexOf('## Contract Stability Matrix');
+    expect(
+      matrixIndex,
+      'data-contract.md must contain the Contract Stability Matrix section',
+    ).toBeGreaterThan(-1);
+    const matrixSection = content.slice(matrixIndex);
+    for (const surface of [
+      /stable[^\n]*(?:public|promise)/i,
+      /schema[- ]versioned/i,
+      /preview/i,
+      /internal/i,
+    ]) {
+      expect(
+        matrixSection,
+        `Contract Stability Matrix must label the surface category matching ${surface}`,
+      ).toMatch(surface);
+    }
+  });
 });
 
 test.describe('README and docs/public/ link integrity', () => {
