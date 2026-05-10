@@ -10,6 +10,7 @@
  *   - version/package metadata.
  * Anything outside this allowlist must produce a strict difference.
  */
+import { Buffer } from 'node:buffer';
 import { expect, test } from '@playwright/test';
 import { type CompatibilityRun, compareCompatibility } from '../harness/compatibility-fixture.js';
 
@@ -82,17 +83,26 @@ test.describe('Normalization allowlist', () => {
     expect(diffs).toEqual([]);
   });
 
-  test('absolute filesystem prefixes inside string fields are normalized to a stable placeholder', () => {
+  test('absolute path prefixes equal to the fixture root are normalized away inside string fields', () => {
+    const rootDir = '/tmp/runboard-fixture-root-A';
     const htmlFiles = new Map<string, Record<string, unknown>>([
       [
         'abc',
         {
           fileId: 'abc',
           fileName: 'a.spec.ts',
-          tests: [{ title: 't', location: { file: 'a.spec.ts', line: 1, column: 1 } }],
+          tests: [
+            {
+              title: 't',
+              location: { file: `${rootDir}/a.spec.ts`, line: 1, column: 1 },
+            },
+          ],
         },
       ],
     ]);
+    // Runboard side stores the same field as a POSIX-relative path; root
+    // normalization should strip the html-side absolute prefix so the
+    // comparator sees them as equal.
     const runboardFiles = new Map<string, Record<string, unknown>>([
       [
         'abc',
@@ -103,17 +113,228 @@ test.describe('Normalization allowlist', () => {
         },
       ],
     ]);
+    const diffs = compareCompatibility(buildRun({ htmlFiles, runboardFiles, rootDir }));
+    expect(diffs).toEqual([]);
+  });
+
+  test('snippet/codeframe absolute paths under the fixture root normalize to a stable placeholder', () => {
+    const rootDir = '/tmp/runboard-fixture-root-B';
+    const codeframeWithAbsolute = `at ${rootDir}/specs/a.spec.ts:1:1\nexpect(1).toBe(2)`;
+    const codeframeWithRelative = `at specs/a.spec.ts:1:1\nexpect(1).toBe(2)`;
+    const htmlFiles = new Map<string, Record<string, unknown>>([
+      [
+        'abc',
+        {
+          fileId: 'abc',
+          fileName: 'a.spec.ts',
+          tests: [
+            {
+              title: 't',
+              results: [
+                {
+                  retry: 0,
+                  status: 'failed',
+                  errors: [{ message: 'bad', codeframe: codeframeWithAbsolute }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    ]);
+    const runboardFiles = new Map<string, Record<string, unknown>>([
+      [
+        'abc',
+        {
+          fileId: 'abc',
+          fileName: 'a.spec.ts',
+          tests: [
+            {
+              title: 't',
+              results: [
+                {
+                  retry: 0,
+                  status: 'failed',
+                  errors: [{ message: 'bad', codeframe: codeframeWithRelative }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    ]);
+    const diffs = compareCompatibility(buildRun({ htmlFiles, runboardFiles, rootDir }));
+    expect(diffs).toEqual([]);
+  });
+
+  test('non-root path differences still surface as strict mismatches', () => {
+    const rootDir = '/tmp/runboard-fixture-root-C';
+    const htmlFiles = new Map<string, Record<string, unknown>>([
+      [
+        'abc',
+        {
+          fileId: 'abc',
+          fileName: 'a.spec.ts',
+          tests: [
+            { title: 't', location: { file: '/some/other/place/a.spec.ts', line: 1, column: 1 } },
+          ],
+        },
+      ],
+    ]);
+    const runboardFiles = new Map<string, Record<string, unknown>>([
+      [
+        'abc',
+        {
+          fileId: 'abc',
+          fileName: 'a.spec.ts',
+          tests: [
+            { title: 't', location: { file: '/yet/another/place/a.spec.ts', line: 1, column: 1 } },
+          ],
+        },
+      ],
+    ]);
+    const diffs = compareCompatibility(buildRun({ htmlFiles, runboardFiles, rootDir }));
+    expect(diffs).toHaveLength(1);
+    expect(diffs[0]?.path).toContain('location/file');
+  });
+
+  test('attachment data/<sha>.<ext> path divergence is normalized only when underlying bytes match', () => {
+    const sharedBytes = Buffer.from([0xde, 0xad, 0xbe, 0xef]);
+    const htmlFiles = new Map<string, Record<string, unknown>>([
+      [
+        'abc',
+        {
+          fileId: 'abc',
+          fileName: 'a.spec.ts',
+          tests: [
+            {
+              title: 't',
+              results: [
+                {
+                  retry: 0,
+                  status: 'passed',
+                  attachments: [
+                    {
+                      name: 'screenshot',
+                      contentType: 'image/png',
+                      path: 'data/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png',
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    ]);
+    const runboardFiles = new Map<string, Record<string, unknown>>([
+      [
+        'abc',
+        {
+          fileId: 'abc',
+          fileName: 'a.spec.ts',
+          tests: [
+            {
+              title: 't',
+              results: [
+                {
+                  retry: 0,
+                  status: 'passed',
+                  attachments: [
+                    {
+                      name: 'screenshot',
+                      contentType: 'image/png',
+                      path: 'data/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.png',
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    ]);
+    const htmlAttachments = new Map<string, Buffer>([
+      ['aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png', sharedBytes],
+    ]);
+    const runboardAttachments = new Map<string, Buffer>([
+      ['bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.png', sharedBytes],
+    ]);
     const diffs = compareCompatibility(
-      buildRun({
-        htmlFiles,
-        runboardFiles,
-        rootDir: '/different/root/that/should/not/matter',
-      }),
+      buildRun({ htmlFiles, runboardFiles, htmlAttachments, runboardAttachments }),
     );
     expect(diffs).toEqual([]);
   });
 
-  test('attachment data/<sha>.<ext> path divergence is normalized when both reference equivalent extensions', () => {
+  test('attachments with same path but divergent bytes surface a content difference', () => {
+    const htmlFiles = new Map<string, Record<string, unknown>>([
+      [
+        'abc',
+        {
+          fileId: 'abc',
+          fileName: 'a.spec.ts',
+          tests: [
+            {
+              title: 't',
+              results: [
+                {
+                  retry: 0,
+                  status: 'passed',
+                  attachments: [
+                    {
+                      name: 'screenshot',
+                      contentType: 'image/png',
+                      path: 'data/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png',
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    ]);
+    const runboardFiles = new Map<string, Record<string, unknown>>([
+      [
+        'abc',
+        {
+          fileId: 'abc',
+          fileName: 'a.spec.ts',
+          tests: [
+            {
+              title: 't',
+              results: [
+                {
+                  retry: 0,
+                  status: 'passed',
+                  attachments: [
+                    {
+                      name: 'screenshot',
+                      contentType: 'image/png',
+                      path: 'data/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.png',
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    ]);
+    const htmlAttachments = new Map<string, Buffer>([
+      ['aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png', Buffer.from('html-bytes')],
+    ]);
+    const runboardAttachments = new Map<string, Buffer>([
+      ['bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.png', Buffer.from('runboard-bytes-differ')],
+    ]);
+    const diffs = compareCompatibility(
+      buildRun({ htmlFiles, runboardFiles, htmlAttachments, runboardAttachments }),
+    );
+    expect(diffs).toHaveLength(1);
+    expect(diffs[0]?.path).toContain('attachments/0/path');
+  });
+
+  test('attachment path divergence without provided bytes refuses to normalize and surfaces a difference', () => {
     const htmlFiles = new Map<string, Record<string, unknown>>([
       [
         'abc',
@@ -169,7 +390,8 @@ test.describe('Normalization allowlist', () => {
       ],
     ]);
     const diffs = compareCompatibility(buildRun({ htmlFiles, runboardFiles }));
-    expect(diffs).toEqual([]);
+    expect(diffs).toHaveLength(1);
+    expect(diffs[0]?.path).toContain('attachments/0/path');
   });
 
   test('attachment with mismatched extension still surfaces a difference', () => {
@@ -227,7 +449,15 @@ test.describe('Normalization allowlist', () => {
         },
       ],
     ]);
-    const diffs = compareCompatibility(buildRun({ htmlFiles, runboardFiles }));
+    const htmlAttachments = new Map<string, Buffer>([
+      ['aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png', Buffer.from('same-bytes')],
+    ]);
+    const runboardAttachments = new Map<string, Buffer>([
+      ['aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.jpg', Buffer.from('same-bytes')],
+    ]);
+    const diffs = compareCompatibility(
+      buildRun({ htmlFiles, runboardFiles, htmlAttachments, runboardAttachments }),
+    );
     expect(diffs).toHaveLength(1);
     expect(diffs[0]?.path).toContain('attachments/0/path');
   });

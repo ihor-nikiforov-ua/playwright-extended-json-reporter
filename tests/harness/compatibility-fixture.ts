@@ -13,6 +13,7 @@
  */
 import { Buffer } from 'node:buffer';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { inflateRawSync } from 'node:zlib';
@@ -28,6 +29,16 @@ export interface CompatibilityRun {
   runboardReport: Record<string, unknown>;
   runboardFiles: Map<string, Record<string, unknown>>;
   rootDir: string;
+  /**
+   * Attachment bytes referenced by `data/<sha>.<ext>` paths in the HTML
+   * report. Keys are the basename (`<sha>.<ext>`); values are the file bytes.
+   * Optional so non-attachment unit tests can omit it. When omitted, the
+   * comparator cannot prove byte-equivalence and therefore refuses to
+   * normalize attachment-hash divergence.
+   */
+  htmlAttachments?: Map<string, Buffer>;
+  /** Mirror of {@link htmlAttachments} for the Runboard side. */
+  runboardAttachments?: Map<string, Buffer>;
 }
 
 export interface CompatibilityDifference {
@@ -40,21 +51,32 @@ const RUNBOARD_EXTENSION_KEY = 'runboard';
 
 const TIMESTAMP_PLACEHOLDER = '<timestamp>';
 const DURATION_PLACEHOLDER = '<duration>';
-const ATTACHMENT_HASH_PLACEHOLDER = '<sha>';
 
 const TIMESTAMP_FIELDS: ReadonlySet<string> = new Set(['startTime']);
 const DURATION_FIELDS: ReadonlySet<string> = new Set(['duration']);
 const SNIPPET_FIELDS: ReadonlySet<string> = new Set(['snippet', 'codeframe', 'stack']);
 
-// data/<sha>.<ext> — the HTML reporter and the Runboard Reporter both write
-// attachments under their respective `data/` folders, but the SHA may differ
-// when normalized inputs (timestamps, ANSI escapes, etc.) change the bytes
-// even though the underlying asset is equivalent.
-const ATTACHMENT_PATH_PATTERN = /^(data\/)([0-9a-f]+)(\.[A-Za-z0-9_.-]+)?$/;
+const ATTACHMENT_PATH_PATTERN = /^data\/([0-9a-f]+)(\.[A-Za-z0-9_.-]+)?$/;
+
+interface NormalizeContext {
+  rootDir: string;
+  attachments: Map<string, Buffer> | undefined;
+}
 
 export function compareCompatibility(run: CompatibilityRun): CompatibilityDifference[] {
-  const html = normalizeNode(run.htmlReport, '') as Record<string, unknown>;
-  const runboard = normalizeNode(run.runboardReport, '') as Record<string, unknown>;
+  const htmlContext: NormalizeContext = {
+    rootDir: run.rootDir,
+    attachments: run.htmlAttachments,
+  };
+  const runboardContext: NormalizeContext = {
+    rootDir: run.rootDir,
+    attachments: run.runboardAttachments,
+  };
+  const html = normalizeNode(run.htmlReport, '', htmlContext) as Record<string, unknown>;
+  const runboard = normalizeNode(run.runboardReport, '', runboardContext) as Record<
+    string,
+    unknown
+  >;
 
   const diffs: CompatibilityDifference[] = [];
   diffObjects('report', html, runboard, diffs);
@@ -69,8 +91,8 @@ export function compareCompatibility(run: CompatibilityRun): CompatibilityDiffer
     }
     diffObjects(
       `files/${fileId}`,
-      normalizeNode(htmlFile, '') as Record<string, unknown>,
-      normalizeNode(runboardFile, '') as Record<string, unknown>,
+      normalizeNode(htmlFile, '', htmlContext) as Record<string, unknown>,
+      normalizeNode(runboardFile, '', runboardContext) as Record<string, unknown>,
       diffs,
     );
   }
@@ -78,14 +100,14 @@ export function compareCompatibility(run: CompatibilityRun): CompatibilityDiffer
   return diffs;
 }
 
-function normalizeNode(value: unknown, key: string): unknown {
+function normalizeNode(value: unknown, key: string, ctx: NormalizeContext): unknown {
   if (Array.isArray(value)) {
-    return value.map((item) => normalizeNode(item, ''));
+    return value.map((item) => normalizeNode(item, '', ctx));
   }
   if (isPlainObject(value)) {
     const out: Record<string, unknown> = {};
     for (const k of Object.keys(value)) {
-      out[k] = normalizeNode(value[k], k);
+      out[k] = normalizeNode(value[k], k, ctx);
     }
     return out;
   }
@@ -96,22 +118,45 @@ function normalizeNode(value: unknown, key: string): unknown {
   }
   if (typeof value === 'string') {
     if (TIMESTAMP_FIELDS.has(key)) return TIMESTAMP_PLACEHOLDER;
-    if (key === 'path') return normalizeAttachmentPath(value);
-    if (SNIPPET_FIELDS.has(key)) return normalizeLineEndings(value);
-    return value;
+    let normalized = value;
+    if (key === 'path') normalized = normalizeAttachmentPath(normalized, ctx.attachments);
+    if (SNIPPET_FIELDS.has(key)) normalized = normalizeLineEndings(normalized);
+    normalized = normalizeRootPaths(normalized, ctx.rootDir);
+    return normalized;
   }
   return value;
 }
 
-function normalizeAttachmentPath(value: string): string {
-  const m = ATTACHMENT_PATH_PATTERN.exec(value);
-  if (!m) return value;
-  const ext = m[3] ?? '';
-  return `${m[1]}${ATTACHMENT_HASH_PLACEHOLDER}${ext}`;
+function normalizeAttachmentPath(
+  value: string,
+  attachments: Map<string, Buffer> | undefined,
+): string {
+  const match = ATTACHMENT_PATH_PATTERN.exec(value);
+  if (!match) return value;
+  // Only normalize the hash when we can prove byte-equivalence: replace the
+  // sha with a content-derived digest of the referenced attachment bytes. If
+  // bytes are missing, leave the original sha so a real divergence still
+  // surfaces.
+  if (!attachments) return value;
+  const basename = `${match[1]}${match[2] ?? ''}`;
+  const bytes = attachments.get(basename);
+  if (!bytes) return value;
+  const contentDigest = createHash('sha1').update(bytes).digest('hex');
+  const ext = match[2] ?? '';
+  return `data/${contentDigest}${ext}`;
 }
 
 function normalizeLineEndings(value: string): string {
   return value.replace(/\r\n/g, '\n');
+}
+
+function normalizeRootPaths(value: string, rootDir: string): string {
+  if (!rootDir) return value;
+  const escaped = rootDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // Strip every "<rootDir>/" occurrence so an absolute "rootDir/x" and a
+  // relative "x" collapse to the same canonical POSIX-relative form, even
+  // when the absolute prefix is embedded inside a multi-line snippet.
+  return value.replace(new RegExp(`${escaped}/`, 'g'), '');
 }
 
 export function formatDifferences(diffs: CompatibilityDifference[]): string {
@@ -382,13 +427,19 @@ export async function runCompatibilityFixture(
     await readFile(join(runboardOutputDir, 'report.json'), 'utf8'),
   ) as Record<string, unknown>;
   const runboardFiles = await readRunboardFileShards(runboardOutputDir);
+  const runboardAttachments = await readAttachmentBytes(join(runboardOutputDir, 'data'));
   const html = await extractHtmlReportData(join(htmlOutputDir, 'index.html'));
+  // Playwright's HTML reporter writes attachment bytes to <htmlOutputDir>/data/<sha>.<ext>
+  // alongside the index.html bundle, not into the embedded zip.
+  const htmlAttachments = await readAttachmentBytes(join(htmlOutputDir, 'data'));
 
   return {
     htmlReport: html.report,
     htmlFiles: html.files,
+    htmlAttachments,
     runboardReport,
     runboardFiles,
+    runboardAttachments,
     rootDir: specsDir,
   };
 }
@@ -404,6 +455,19 @@ async function readRunboardFileShards(
     if (!fileIdMatch?.[1]) continue;
     const text = await readFile(join(outputDir, entry.name), 'utf8');
     out.set(fileIdMatch[1], JSON.parse(text) as Record<string, unknown>);
+  }
+  return out;
+}
+
+async function readAttachmentBytes(dataDir: string): Promise<Map<string, Buffer>> {
+  const out = new Map<string, Buffer>();
+  const entries = await readdir(dataDir, { withFileTypes: true }).catch((error: unknown) => {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
+  });
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    out.set(entry.name, await readFile(join(dataDir, entry.name)));
   }
   return out;
 }

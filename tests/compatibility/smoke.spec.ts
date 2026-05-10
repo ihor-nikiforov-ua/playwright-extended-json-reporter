@@ -12,7 +12,6 @@
  * an AFK agent can act without spelunking through both bundles by hand.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,10 +28,10 @@ const reporterDist = resolve(repoRoot, 'dist', 'runboard-reporter.js');
 test.describe('Compatibility Smoke Suite', () => {
   let workDir: string;
 
+  // Always rebuild before the smoke suite so a stale local or cached dist can
+  // never let compatibility checks pass against old reporter code.
   test.beforeAll(() => {
-    if (!existsSync(reporterDist)) {
-      execFileSync('npm', ['run', 'build'], { cwd: repoRoot, stdio: 'inherit' });
-    }
+    execFileSync('npm', ['run', 'build'], { cwd: repoRoot, stdio: 'inherit' });
   });
 
   test.beforeEach(async () => {
