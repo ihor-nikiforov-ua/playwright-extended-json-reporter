@@ -38,9 +38,60 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, test } from '@playwright/test';
-import { formatCatalogDisplayErrorDifferences } from '../harness/compatibility-fixture.js';
+import {
+  type CompatibilityRun,
+  formatCatalogDisplayErrorDifferences,
+} from '../harness/compatibility-fixture.js';
 import { ERROR_CATALOG_FIXTURES } from './fixtures.js';
 import { runCatalogDisplayErrorParity } from './run-catalog-spec.js';
+
+interface ParityResultView {
+  steps: Array<Record<string, unknown>>;
+  errors: Array<Record<string, unknown>>;
+  evidence: Array<Record<string, unknown>>;
+}
+
+/**
+ * Reads the first test result from the side of a {@link CompatibilityRun} the
+ * caller selected so issue-specific parity assertions can compare matching
+ * fields between the Runboard Reporter and Playwright's HTML reporter without
+ * re-implementing shard discovery. The harness pins both reporters to the
+ * same single-test fixture, so the first encountered result is the relevant
+ * one on each side.
+ */
+function readParityPrimary(run: CompatibilityRun, side: 'runboard' | 'html'): ParityResultView {
+  const files = side === 'runboard' ? run.runboardFiles : run.htmlFiles;
+  for (const file of files.values()) {
+    const tests = (file['tests'] as Array<Record<string, unknown>> | undefined) ?? [];
+    for (const testCase of tests) {
+      const results = (testCase['results'] as Array<Record<string, unknown>> | undefined) ?? [];
+      const [primary] = results;
+      if (!primary) continue;
+      const steps = (primary['steps'] as Array<Record<string, unknown>> | undefined) ?? [];
+      const errors = (primary['errors'] as Array<Record<string, unknown>> | undefined) ?? [];
+      const evidence =
+        side === 'runboard'
+          ? ((primary['runboard'] as { evidence?: Array<Record<string, unknown>> } | undefined)
+              ?.evidence ?? [])
+          : [];
+      return { steps, errors, evidence };
+    }
+  }
+  return { steps: [], errors: [], evidence: [] };
+}
+
+function findStepByTitle(
+  steps: ReadonlyArray<Record<string, unknown>>,
+  title: string,
+): Record<string, unknown> | undefined {
+  for (const step of steps) {
+    if (step['title'] === title) return step;
+    const nested = (step['steps'] as Array<Record<string, unknown>> | undefined) ?? [];
+    const found = findStepByTitle(nested, title);
+    if (found) return found;
+  }
+  return undefined;
+}
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const reporterDist = resolve(repoRoot, 'dist', 'runboard-reporter.js');
@@ -119,7 +170,24 @@ const EXPECTED_PARITY_FAILURES: ReadonlySet<number> = new Set<number>([
   // in tests/contract/display-error-formatter.spec.ts pins each shape so a
   // future change cannot drop the snippet, duplicate the headline, strip
   // ANSI, or synthesize a fake codeframe for the stackless worker case.
-  39, 40, 41, 42, 43, 44,
+  // Issue #44 dropped catalog IDs 39, 40 (error inside test.step,
+  // test.step.skip downstream marker). A `throw` inside a test.step
+  // callback arrives as a regular TestError on `result.errors[]` whose
+  // `error.stack` carries both the throw frame and the test.step boundary
+  // frame, with `error.snippet` pinned to the throw line and structural
+  // step context (`stepPath`, `stepCategory`) traveling on the
+  // index-aligned `result.runboard.evidence[]` entry. The downstream
+  // marker pattern after `test.step.skip(...)` arrives as an ordinary
+  // body-level TestError (no step boundary frame, no stepPath) while the
+  // skipped step itself surfaces on `result.steps[].skipped`. Both shapes
+  // round-trip through the same generic headline + snippet + stack-tail
+  // partition the hook/fixture rows already use, so no formatter changes
+  // were needed; contract regression tests in
+  // tests/contract/display-error-formatter.spec.ts pin both shapes so a
+  // future change cannot drop the snippet, collapse the test.step
+  // boundary frame into the throw frame, or synthesize a fake stepPath
+  // for the body-level marker.
+  41, 42, 43, 44,
 ]);
 
 test.describe('Error Catalog — Display Error parity', () => {
@@ -143,7 +211,7 @@ test.describe('Error Catalog — Display Error parity', () => {
     const skip = EXPECTED_PARITY_FAILURES.has(fixture.id);
     const define = skip ? test.skip : test;
     define(`${fixture.id}. ${fixture.errorType}`, async () => {
-      const { diffs } = await runCatalogDisplayErrorParity({
+      const { run, diffs } = await runCatalogDisplayErrorParity({
         workDir,
         reporterDist,
         fixture,
@@ -155,6 +223,59 @@ test.describe('Error Catalog — Display Error parity', () => {
         );
       }
       expect(diffs).toEqual([]);
+
+      // Issue #44 acceptance criteria — gated alongside the focused Display
+      // Error parity comparator because that comparator only diffs
+      // `result.errors[]` and top-level `report.errors[]`. The issue requires
+      // step titles, skipped-step structure, and Structured Error Evidence
+      // index-alignment to also match the HTML reporter, so each issue #44
+      // catalog row pins its own structural invariants here.
+      if (fixture.id === 39) {
+        // Error inside test.step(...) → evidence[0] is index-aligned with
+        // errors[0] and carries the test.step boundary metadata.
+        const runboard = readParityPrimary(run, 'runboard');
+        expect(runboard.errors.length, 'expected exactly one Display Error').toBe(1);
+        expect(
+          runboard.evidence.length,
+          'expected result.errors.length === result.runboard.evidence.length',
+        ).toBe(runboard.errors.length);
+        expect(runboard.evidence[0]?.['stepPath']).toContain('open settings');
+        expect(runboard.evidence[0]?.['stepCategory']).toBe('test.step');
+      }
+      if (fixture.id === 40) {
+        // test.step.skip(...) downstream marker → both reporters serialize
+        // the skipped step as `seeded data (skipped)` with `skipped: true`,
+        // and the body-level marker error pairs with evidence[0] without
+        // `stepPath`/`stepCategory`.
+        const runboard = readParityPrimary(run, 'runboard');
+        const html = readParityPrimary(run, 'html');
+        const runboardSkipped = findStepByTitle(runboard.steps, 'seeded data (skipped)');
+        const htmlSkipped = findStepByTitle(html.steps, 'seeded data (skipped)');
+        expect(
+          runboardSkipped,
+          'expected Runboard `result.steps[]` to contain a step titled "seeded data (skipped)"',
+        ).toBeDefined();
+        expect(
+          htmlSkipped,
+          'expected HTML `result.steps[]` to contain a step titled "seeded data (skipped)"',
+        ).toBeDefined();
+        expect(runboardSkipped?.['skipped']).toBe(true);
+        expect(htmlSkipped?.['skipped']).toBe(true);
+
+        expect(runboard.errors.length, 'expected exactly one Display Error').toBe(1);
+        expect(
+          runboard.evidence.length,
+          'expected result.errors.length === result.runboard.evidence.length',
+        ).toBe(runboard.errors.length);
+        const primaryEvidence = runboard.evidence[0] ?? {};
+        expect('stepPath' in primaryEvidence, 'body-level marker evidence must omit stepPath').toBe(
+          false,
+        );
+        expect(
+          'stepCategory' in primaryEvidence,
+          'body-level marker evidence must omit stepCategory',
+        ).toBe(false);
+      }
     });
   }
 });
