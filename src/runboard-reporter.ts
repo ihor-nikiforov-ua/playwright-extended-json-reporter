@@ -48,11 +48,18 @@ const RUNBOARD_LOG_PREFIX = 'playwright-runboard-reporter:';
 // Playwright's HTML reporter usage of these hooks closely so the merged
 // Runboard Data Bundle's `report.machines[]` carries the same shard
 // metadata (tag, shardIndex, startTime, duration).
+//
+// These payload shapes are Playwright-internal, so each interface and the
+// hooks that consume them are `@internal`: `stripInternal` removes them from
+// `dist/runboard-reporter.d.ts` while preserving the runtime methods that
+// Playwright's Multiplexer needs to invoke.
+/** @internal */
 interface MergeReportConfigureParams {
   reportPath: string;
   config: { tags?: string[]; shard?: { current: number; total: number } | null };
 }
 
+/** @internal */
 interface MergeReportEndParams {
   reportPath: string;
   result: { startTime: Date; duration: number };
@@ -82,6 +89,7 @@ export class RunboardReporter implements Reporter {
   // Playwright wraps v1 reporters in `ReporterV2Wrapper`, which only proxies
   // `onConfigure`/`onBegin`/`onTestBegin`/...; the merge-reports hooks would
   // be silently dropped and `report.machines[]` would never populate.
+  /** @internal */
   version(): 'v2' {
     return 'v2';
   }
@@ -102,6 +110,7 @@ export class RunboardReporter implements Reporter {
     this.topLevelErrors.push(error);
   }
 
+  /** @internal */
   onReportConfigure(params: MergeReportConfigureParams): void {
     this.shardConfigs.set(params.reportPath, {
       tags: params.config.tags ?? [],
@@ -109,6 +118,7 @@ export class RunboardReporter implements Reporter {
     });
   }
 
+  /** @internal */
   onReportEnd(params: MergeReportEndParams): void {
     const config = this.shardConfigs.get(params.reportPath);
     if (!config) {
@@ -129,14 +139,22 @@ export class RunboardReporter implements Reporter {
     this.pendingConfig = config;
   }
 
+  // Public Playwright Reporter v2 onBegin — this is the only overload that
+  // surfaces in `dist/runboard-reporter.d.ts`.
+  onBegin(suite: Suite): void;
+  // v1-style overload kept as a Compatibility Adapter for `ReporterV2Wrapper`
+  // dispatch and for unit tests that pass `(config, suite)` directly. Marked
+  // `@internal` so `stripInternal` excludes it from the public declaration
+  // surface; the runtime behavior is preserved by the implementation below.
+  /** @internal */
+  onBegin(config: FullConfig, suite: Suite): void;
   onBegin(configOrSuite: FullConfig | Suite, maybeSuite?: Suite): void {
     let config: FullConfig;
     let suite: Suite;
     if (maybeSuite !== undefined) {
-      // v1-style call: `onBegin(config, suite)` (used directly by unit tests
-      // and by Playwright's `ReporterV2Wrapper` when this reporter were ever
-      // treated as v1). The pending config from a prior `onConfigure` is not
-      // consulted here; the explicit argument always wins.
+      // v1-style call: `onBegin(config, suite)`. The pending config from a
+      // prior `onConfigure` is not consulted here; the explicit argument
+      // always wins.
       config = configOrSuite as FullConfig;
       suite = maybeSuite;
     } else {
