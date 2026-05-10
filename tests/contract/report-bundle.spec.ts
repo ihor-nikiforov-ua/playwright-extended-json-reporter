@@ -85,6 +85,105 @@ test.describe('RunboardReporter — Producer Contract', () => {
     expect(report.machines).toEqual([]);
   });
 
+  test('merge-reports onReportConfigure/onReportEnd hooks populate report.machines per shard', async () => {
+    const reporter = new RunboardReporter({ outputFolder });
+    const run = fakeRun({ rootDir: '/repo' });
+    reporter.onBegin?.(run.config, run.rootSuite);
+
+    type MergeAdapter = {
+      onReportConfigure?: (params: {
+        reportPath: string;
+        config: { tags: string[]; shard: null | { current: number; total: number } };
+      }) => void;
+      onReportEnd?: (params: {
+        reportPath: string;
+        result: { startTime: Date; duration: number };
+      }) => void;
+    };
+    const adapter = reporter as unknown as MergeAdapter;
+    expect(typeof adapter.onReportConfigure).toBe('function');
+    expect(typeof adapter.onReportEnd).toBe('function');
+
+    adapter.onReportConfigure?.({
+      reportPath: '/tmp/blob/report-1.zip',
+      config: { tags: ['linux'], shard: { current: 1, total: 2 } },
+    });
+    adapter.onReportEnd?.({
+      reportPath: '/tmp/blob/report-1.zip',
+      result: { startTime: new Date(1000), duration: 250 },
+    });
+    adapter.onReportConfigure?.({
+      reportPath: '/tmp/blob/report-2.zip',
+      config: { tags: ['windows'], shard: { current: 2, total: 2 } },
+    });
+    adapter.onReportEnd?.({
+      reportPath: '/tmp/blob/report-2.zip',
+      result: { startTime: new Date(2000), duration: 400 },
+    });
+
+    await reporter.onEnd?.(fakeFullResult({ status: 'passed' }));
+
+    const report = JSON.parse(await readFile(join(outputFolder, 'report.json'), 'utf8'));
+    expect(report.machines).toEqual([
+      { tag: ['linux'], startTime: 1000, duration: 250, shardIndex: 1 },
+      { tag: ['windows'], startTime: 2000, duration: 400, shardIndex: 2 },
+    ]);
+  });
+
+  test('merge-reports machines omit shardIndex when blob has no shard config', async () => {
+    const reporter = new RunboardReporter({ outputFolder });
+    const run = fakeRun({ rootDir: '/repo' });
+    reporter.onBegin?.(run.config, run.rootSuite);
+
+    type MergeAdapter = {
+      onReportConfigure?: (params: {
+        reportPath: string;
+        config: { tags: string[]; shard: null | { current: number; total: number } };
+      }) => void;
+      onReportEnd?: (params: {
+        reportPath: string;
+        result: { startTime: Date; duration: number };
+      }) => void;
+    };
+    const adapter = reporter as unknown as MergeAdapter;
+    adapter.onReportConfigure?.({
+      reportPath: '/tmp/blob/only.zip',
+      config: { tags: [], shard: null },
+    });
+    adapter.onReportEnd?.({
+      reportPath: '/tmp/blob/only.zip',
+      result: { startTime: new Date(500), duration: 75 },
+    });
+
+    await reporter.onEnd?.(fakeFullResult({ status: 'passed' }));
+
+    const report = JSON.parse(await readFile(join(outputFolder, 'report.json'), 'utf8'));
+    expect(report.machines).toEqual([{ tag: [], startTime: 500, duration: 75 }]);
+  });
+
+  test('merge-reports onReportEnd without matching onReportConfigure does not emit a machine', async () => {
+    const reporter = new RunboardReporter({ outputFolder });
+    const run = fakeRun({ rootDir: '/repo' });
+    reporter.onBegin?.(run.config, run.rootSuite);
+
+    type MergeAdapter = {
+      onReportEnd?: (params: {
+        reportPath: string;
+        result: { startTime: Date; duration: number };
+      }) => void;
+    };
+    const adapter = reporter as unknown as MergeAdapter;
+    adapter.onReportEnd?.({
+      reportPath: '/tmp/blob/orphan.zip',
+      result: { startTime: new Date(1), duration: 1 },
+    });
+
+    await reporter.onEnd?.(fakeFullResult({ status: 'passed' }));
+
+    const report = JSON.parse(await readFile(join(outputFolder, 'report.json'), 'utf8'));
+    expect(report.machines).toEqual([]);
+  });
+
   test('report.options is empty when no display options are provided', async () => {
     const reporter = new RunboardReporter({ outputFolder });
     const run = fakeRun({ rootDir: '/repo' });

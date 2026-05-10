@@ -540,6 +540,144 @@ export async function runCompatibilityFixture(
   };
 }
 
+export interface RunMergeReportsFixtureOptions {
+  workDir: string;
+  reporterDist: string;
+  specs: Record<string, string>;
+  /**
+   * One config block per shard; each block contributes one machine to the
+   * merged report (matching Playwright's HTML reporter `machines[]` semantics).
+   * The harness invokes Playwright once per shard with `--shard=current/total`
+   * and the shard-specific `tags`, then runs `playwright merge-reports` over
+   * all collected blob reports with both the Runboard Reporter and Playwright
+   * HTML reporter wired into the merge config.
+   */
+  shards: Array<{ tags?: string[] }>;
+}
+
+export async function runMergeReportsCompatibilityFixture(
+  options: RunMergeReportsFixtureOptions,
+): Promise<CompatibilityRun> {
+  const { workDir, reporterDist, specs, shards } = options;
+  if (shards.length === 0) {
+    throw new Error('Compatibility Fixture: runMergeReportsCompatibilityFixture needs ≥1 shard');
+  }
+  const specsDir = join(workDir, 'specs');
+  const blobDir = join(workDir, 'blob-reports');
+  const runboardOutputDir = join(workDir, 'runboard-bundle');
+  const htmlOutputDir = join(workDir, 'html-bundle');
+
+  await mkdirp(specsDir);
+  await mkdirp(blobDir);
+  for (const [name, body] of Object.entries(specs)) {
+    const target = join(specsDir, name);
+    await mkdirp(dirname(target));
+    await writeFile(target, body, 'utf8');
+  }
+
+  const pkgRoot = resolve(dirname(reporterDist), '..');
+  const playwrightBin = join(pkgRoot, 'node_modules', '.bin', 'playwright');
+
+  const childEnv: NodeJS.ProcessEnv = { ...process.env, FORCE_COLOR: '0' };
+  for (const key of [
+    'PLAYWRIGHT_RUNBOARD_OUTPUT_DIR',
+    'PLAYWRIGHT_RUNBOARD_ATTACHMENTS_BASE_URL',
+    'PLAYWRIGHT_HTML_OUTPUT_DIR',
+    'PLAYWRIGHT_HTML_REPORT',
+    'PLAYWRIGHT_HTML_ATTACHMENTS_BASE_URL',
+    'PLAYWRIGHT_BLOB_DO_NOT_PROCESS_CLI_OPTIONS',
+  ]) {
+    delete childEnv[key];
+  }
+  childEnv['PLAYWRIGHT_HTML_OPEN'] = 'never';
+
+  for (const [index, shard] of shards.entries()) {
+    const current = index + 1;
+    const total = shards.length;
+    const shardBlobDir = join(blobDir, `shard-${current}`);
+    await mkdirp(shardBlobDir);
+    const shardConfigPath = join(workDir, `playwright.shard-${current}.config.mjs`);
+    const blobOptions = JSON.stringify({ outputDir: shardBlobDir, fileName: `report.zip` });
+    const shardConfig = [
+      `import { defineConfig } from '@playwright/test';`,
+      `export default defineConfig({`,
+      `  testDir: ${JSON.stringify(specsDir)},`,
+      `  fullyParallel: false,`,
+      `  workers: 1,`,
+      shard.tags && shard.tags.length > 0 ? `  tag: ${JSON.stringify(shard.tags)},` : '',
+      `  reporter: [['blob', ${blobOptions}]],`,
+      `});`,
+      '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+    await writeFile(shardConfigPath, shardConfig, 'utf8');
+
+    execFileSync(
+      playwrightBin,
+      ['test', '--config', shardConfigPath, `--shard=${current}/${total}`],
+      { cwd: pkgRoot, stdio: 'pipe', env: childEnv },
+    );
+  }
+
+  // Stage every blob into a single directory because `merge-reports` reads
+  // one directory rather than walking subdirectories.
+  const mergedBlobDir = join(workDir, 'merged-blob');
+  await mkdirp(mergedBlobDir);
+  for (const [index] of shards.entries()) {
+    const current = index + 1;
+    const source = join(blobDir, `shard-${current}`, `report.zip`);
+    const dest = join(mergedBlobDir, `report-${current}.zip`);
+    await writeFile(dest, await readFile(source));
+  }
+
+  const mergeReporterOptions = JSON.stringify({
+    outputFolder: runboardOutputDir,
+    noSnippets: true,
+  });
+  const htmlOptions = JSON.stringify({
+    outputFolder: htmlOutputDir,
+    open: 'never',
+    noSnippets: true,
+  });
+  const mergeConfigPath = join(workDir, 'merge.config.mjs');
+  const mergeConfig = [
+    `import { defineConfig } from '@playwright/test';`,
+    `export default defineConfig({`,
+    `  reporter: [`,
+    `    [${JSON.stringify(reporterDist)}, ${mergeReporterOptions}],`,
+    `    ['html', ${htmlOptions}],`,
+    `  ],`,
+    `});`,
+    '',
+  ].join('\n');
+  await writeFile(mergeConfigPath, mergeConfig, 'utf8');
+
+  execFileSync(playwrightBin, ['merge-reports', '--config', mergeConfigPath, mergedBlobDir], {
+    cwd: pkgRoot,
+    stdio: 'pipe',
+    env: childEnv,
+  });
+
+  const runboardReport = JSON.parse(
+    await readFile(join(runboardOutputDir, 'report.json'), 'utf8'),
+  ) as Record<string, unknown>;
+  const runboardFiles = await readRunboardFileShards(runboardOutputDir);
+  const runboardAttachments = await readAttachmentBytes(join(runboardOutputDir, 'data'));
+  const html = await extractHtmlReportData(join(htmlOutputDir, 'index.html'));
+  const htmlAttachments = await readAttachmentBytes(join(htmlOutputDir, 'data'));
+
+  return {
+    htmlReport: html.report,
+    htmlFiles: html.files,
+    htmlAttachments,
+    runboardReport,
+    runboardFiles,
+    runboardAttachments,
+    rootDir: specsDir,
+  };
+}
+
 async function readRunboardFileShards(
   outputDir: string,
 ): Promise<Map<string, Record<string, unknown>>> {
