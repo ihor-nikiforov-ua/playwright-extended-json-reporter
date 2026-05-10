@@ -2,10 +2,9 @@
  * Public API Reference drift check.
  *
  * The Public API Reference Page (`docs/public/api.md`) is the human-readable
- * map of the package's public exports. This test reads the named exports
- * from `src/index.ts` and asserts that the API reference neither omits a
- * real public export nor invents a `Runboard*` symbol that is not actually
- * exported.
+ * map of the package's public exports. These tests read the public exports
+ * from `src/index.ts` and assert that the API reference neither omits a real
+ * public export nor invents an identifier that is not actually exported.
  */
 import { readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
@@ -17,11 +16,11 @@ const indexPath = resolve(repoRoot, 'src/index.ts');
 const apiDocPath = resolve(repoRoot, 'docs/public/api.md');
 
 /**
- * Extract the public named exports from a `src/index.ts` file written in the
+ * Extract the public exports from a `src/index.ts` file written in the
  * canonical aggregating-barrel form used by this package: `export { ... }
  * from '...';` and `export type { ... } from '...';` clauses. The `default`
- * re-export is intentionally skipped because it is not an identifier in the
- * public type surface.
+ * re-export is included so the documented surface can be cross-checked
+ * against it explicitly.
  */
 function parsePublicExports(source: string): string[] {
   const names = new Set<string>();
@@ -33,11 +32,32 @@ function parsePublicExports(source: string): string[] {
       if (!entry) continue;
       const cleaned = entry.replace(/^type\s+/, '');
       const [name] = cleaned.split(/\s+as\s+/);
-      if (!name || name === 'default') continue;
+      if (!name) continue;
       names.add(name);
     }
   }
   return [...names].sort();
+}
+
+/**
+ * Extract the identifiers documented as exports in the `## Exports` section
+ * of `docs/public/api.md`. Only identifiers wrapped in code spans (backticks)
+ * count, so prose words and quoted module specifiers are ignored. The
+ * section ends at the next H2 heading.
+ */
+function parseDocumentedExports(apiDoc: string): string[] {
+  const heading = '## Exports';
+  const start = apiDoc.indexOf(heading);
+  if (start === -1) return [];
+  const afterHeading = start + heading.length;
+  const nextHeading = apiDoc.indexOf('\n## ', afterHeading);
+  const sectionBody = apiDoc.slice(afterHeading, nextHeading === -1 ? undefined : nextHeading);
+  const ids = new Set<string>();
+  for (const match of sectionBody.matchAll(/`([A-Za-z_][A-Za-z0-9_]*)`/g)) {
+    const id = match[1];
+    if (id) ids.add(id);
+  }
+  return [...ids].sort();
 }
 
 test.describe('Public API Reference drift', () => {
@@ -64,23 +84,27 @@ test.describe('Public API Reference drift', () => {
     ).toEqual([]);
   });
 
-  test('docs/public/api.md does not invent Runboard exports that are not in src/index.ts', async () => {
+  test('docs/public/api.md ## Exports section exactly matches the public exports of src/index.ts', async () => {
     const indexSource = await readFile(indexPath, 'utf8');
     const apiDoc = await readFile(apiDocPath, 'utf8');
     const exports = new Set(parsePublicExports(indexSource));
+    const documented = new Set(parseDocumentedExports(apiDoc));
 
-    const mentioned = new Set<string>();
-    for (const match of apiDoc.matchAll(/\bRunboard[A-Za-z0-9_]*/g)) {
-      mentioned.add(match[0]);
-    }
-    // Documented domain terms that are not exports.
-    mentioned.delete('Runboard');
-    mentioned.delete('RunboardData');
+    expect(
+      exports.has('default'),
+      'src/index.ts must explicitly re-export the default reporter; without it consumers cannot use the package entry as a bare module specifier',
+    ).toBe(true);
 
-    const invented = [...mentioned].filter((name) => !exports.has(name));
+    const invented = [...documented].filter((name) => !exports.has(name));
     expect(
       invented,
-      `docs/public/api.md references Runboard* symbols that are not exported from src/index.ts: ${invented.join(', ')}`,
+      `docs/public/api.md ## Exports section names identifiers that are not exported from src/index.ts: ${invented.join(', ')}`,
+    ).toEqual([]);
+
+    const omitted = [...exports].filter((name) => !documented.has(name));
+    expect(
+      omitted,
+      `docs/public/api.md ## Exports section omits public exports from src/index.ts: ${omitted.join(', ')}`,
     ).toEqual([]);
   });
 
