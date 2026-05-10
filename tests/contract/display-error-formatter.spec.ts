@@ -435,4 +435,141 @@ test.describe('Display Error Formatter — public boundary', () => {
     const callLogOccurrences = error.message.split('Call log:').length - 1;
     expect(callLogOccurrences).toBe(1);
   });
+
+  test('strict mode violation preserves locator-alternative lines (catalog #10)', () => {
+    // Catalog #10 parity: Playwright's strict-mode error packs the violation
+    // headline plus an indented "resolved to N elements" block with one line
+    // per match into `error.message`. The same multi-line content appears at
+    // the head of `error.stack` before the first frame. The formatter must
+    // keep every alternative line in the Display Error message; losing them
+    // strips the locator-preview signal Runboard relies on for triage.
+    const message = [
+      "locator.click: Error: strict mode violation: locator('div') resolved to 2 elements:",
+      "    1) <div>a</div> aka getByText('a')",
+      "    2) <div>b</div> aka getByText('b')",
+      '',
+      'Call log:',
+      "  - waiting for locator('div')",
+      '',
+    ].join('\n');
+    const stack = `${message}    at /repo/tests/strict.spec.ts:5:34`;
+    const run = fakeRun({
+      rootDir: '/repo',
+      files: [
+        {
+          fileName: '/repo/tests/strict.spec.ts',
+          tests: [
+            {
+              title: 'strict mode violation',
+              status: 'failed',
+              expectedStatus: 'passed',
+              results: [{ status: 'failed', errors: [{ message, stack }] }],
+            },
+          ],
+        },
+      ],
+    });
+    const { test: t, result } = pickTestAndResult(run);
+
+    const [error] = formatDisplayErrors(t, result);
+    if (!error) throw new Error('expected Display Error');
+
+    expect(error.message).toContain('strict mode violation');
+    expect(error.message).toContain("1) <div>a</div> aka getByText('a')");
+    expect(error.message).toContain("2) <div>b</div> aka getByText('b')");
+    expect(error.message).toContain('    at /repo/tests/strict.spec.ts:5:34');
+    // Each alternative line appears once — the parsed-stack partition keeps
+    // the multi-line message intact rather than re-rendering it as stack tail.
+    const firstAlternativeOccurrences =
+      error.message.split("1) <div>a</div> aka getByText('a')").length - 1;
+    expect(firstAlternativeOccurrences).toBe(1);
+  });
+
+  test('actionability reason inside Call log is preserved (catalog #11–#16)', () => {
+    // Catalog #11–#16 parity: locator-resolution timeouts (not visible, not
+    // stable, intercepts pointer events, outside viewport, not enabled,
+    // detached) carry their distinguishing reason text inside the Call log
+    // section of `error.message`. The full Call log — including the
+    // actionability retry lines — must reach the Display Error so Runboard
+    // can surface why the element wasn't actionable.
+    const message = [
+      'TimeoutError: locator.click: Timeout 200ms exceeded.',
+      'Call log:',
+      "  - waiting for locator('#b')",
+      '  - locator resolved to <button id="b">Hi</button>',
+      '  - attempting click action',
+      '    - waiting for element to be visible, enabled and stable',
+      '    - element is not visible - waiting...',
+      '    - waiting for element to be visible, enabled and stable',
+      '    - element is not visible - waiting...',
+      '',
+    ].join('\n');
+    const stack = `${message}    at /repo/tests/actionability.spec.ts:5:34`;
+    const run = fakeRun({
+      rootDir: '/repo',
+      files: [
+        {
+          fileName: '/repo/tests/actionability.spec.ts',
+          tests: [
+            {
+              title: 'element is not visible',
+              status: 'failed',
+              expectedStatus: 'passed',
+              results: [{ status: 'failed', errors: [{ message, stack }] }],
+            },
+          ],
+        },
+      ],
+    });
+    const { test: t, result } = pickTestAndResult(run);
+
+    const [error] = formatDisplayErrors(t, result);
+    if (!error) throw new Error('expected Display Error');
+
+    expect(error.message).toContain('element is not visible - waiting...');
+    expect(error.message).toContain('locator resolved to <button id="b">Hi</button>');
+    expect(error.message).toContain('attempting click action');
+    expect(error.message).toContain('    at /repo/tests/actionability.spec.ts:5:34');
+  });
+
+  test('disposed-context error preserves headline and stack tail (catalog #17)', () => {
+    // Catalog #17 parity: disposed-context errors ("Execution context was
+    // destroyed", "JSHandle is disposed", "Frame was detached") arrive as a
+    // single-line headline plus a normal stack. The formatter must preserve
+    // both — the headline is the distinguishing signal, and the stack tail is
+    // the only locality cue Runboard has for the disposed call site.
+    const message =
+      'page.evaluate: Execution context was destroyed, most likely because of a navigation.';
+    const stack =
+      `${message}\n` +
+      '    at /repo/tests/disposed.spec.ts:5:34\n' +
+      '    at runMicrotasks (/repo/lib/runner.js:1:1)';
+    const run = fakeRun({
+      rootDir: '/repo',
+      files: [
+        {
+          fileName: '/repo/tests/disposed.spec.ts',
+          tests: [
+            {
+              title: 'execution context was destroyed',
+              status: 'failed',
+              expectedStatus: 'passed',
+              results: [{ status: 'failed', errors: [{ message, stack }] }],
+            },
+          ],
+        },
+      ],
+    });
+    const { test: t, result } = pickTestAndResult(run);
+
+    const [error] = formatDisplayErrors(t, result);
+    if (!error) throw new Error('expected Display Error');
+
+    expect(error.message).toContain('Execution context was destroyed');
+    expect(error.message).toContain('    at /repo/tests/disposed.spec.ts:5:34');
+    // Headline must appear exactly once — a regression that re-emitted the
+    // pre-frame portion as stack tail would render the headline twice.
+    const headlineOccurrences = error.message.split('Execution context was destroyed').length - 1;
+    expect(headlineOccurrences).toBe(1);
+  });
 });
