@@ -72,8 +72,14 @@ const EXPECTED_PARITY_FAILURES: ReadonlySet<number> = new Set<number>([
   // toContainText, toHaveValue, toHaveCount, toHaveURL/toHaveTitle); their
   // matcher hint, Locator/Expected/Received/Timeout block, and Call log all
   // round-trip through the same partition because Playwright embeds the
-  // multi-line matcher message at the head of `error.stack`.
-  21, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44,
+  // multi-line matcher message at the head of `error.stack`. Issue #39 dropped
+  // catalog IDs 21, 24, 25 (toBeVisible/toBeHidden, toHaveAttribute,
+  // toBeChecked); these visibility/attribute/state matchers share the same
+  // web-first failure shape produced by `formatMatcherMessage` in
+  // playwright-core, so the same partition keeps their matcher hint + Locator
+  // + Expected/Received + Timeout + Call log block intact in
+  // `result.errors[].message`.
+  26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44,
 ]);
 
 test.describe('Error Catalog — Display Error parity', () => {
