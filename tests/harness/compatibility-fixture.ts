@@ -257,15 +257,23 @@ function diffObjects(
   diffs: CompatibilityDifference[],
 ): void {
   const keys = new Set<string>([...Object.keys(expected), ...Object.keys(actual)]);
-  // The Runboard Extension is namespaced by design: when the path is the report
-  // root, ignore the runboard-side `runboard` field and only flag it if the HTML
-  // reporter ever starts emitting one.
-  if (path === 'report' && !(RUNBOARD_EXTENSION_KEY in expected)) {
+  // The Runboard Extension is namespaced by design. The first Runboard Data
+  // Contract places extensions only at `report.runboard` (Runboard Metadata)
+  // and per-result `runboard` (Result Evidence); both are absent from
+  // Playwright's HTML report. Ignore those keys when they're only present on
+  // the runboard side, so a future extension elsewhere still flags as drift.
+  if (!(RUNBOARD_EXTENSION_KEY in expected) && (path === 'report' || isResultPath(path))) {
     keys.delete(RUNBOARD_EXTENSION_KEY);
   }
   for (const key of [...keys].sort()) {
     diffValues(`${path}/${key}`, expected[key], actual[key], diffs);
   }
+}
+
+const RESULT_PATH_PATTERN = /\/tests\/\d+\/results\/\d+$/;
+
+function isResultPath(path: string): boolean {
+  return RESULT_PATH_PATTERN.test(path);
 }
 
 function diffArrays(
@@ -418,12 +426,20 @@ export interface RunCompatibilityFixtureOptions {
    * the comparator matches attachment paths against the configured prefix.
    */
   attachmentsBaseURL?: string;
+  /**
+   * Allow Playwright to exit non-zero. Required for fault-injection fixtures
+   * where the suite itself reports a failure (e.g. error-evidence parity that
+   * intentionally throws or uses `test.fail()` unexpectedly passing). Both
+   * reporters still write a complete bundle when Playwright exits non-zero,
+   * so the comparator and evidence assertions remain meaningful.
+   */
+  expectFailingSuite?: boolean;
 }
 
 export async function runCompatibilityFixture(
   options: RunCompatibilityFixtureOptions,
 ): Promise<CompatibilityRun> {
-  const { workDir, reporterDist, specs, attachmentsBaseURL } = options;
+  const { workDir, reporterDist, specs, attachmentsBaseURL, expectFailingSuite } = options;
   const specsDir = join(workDir, 'specs');
   const runboardOutputDir = join(workDir, 'runboard-bundle');
   const htmlOutputDir = join(workDir, 'html-bundle');
@@ -471,11 +487,11 @@ export async function runCompatibilityFixture(
   const pkgRoot = resolve(dirname(reporterDist), '..');
   const playwrightBin = join(pkgRoot, 'node_modules', '.bin', 'playwright');
   // Playwright exits non-zero when the fixture itself reports a failure. The
-  // harness uses non-failing fixtures to make passing-bundle parity the
-  // baseline; fault-injection scenarios will need to opt in to ignore the exit
-  // code separately. The CLI must run from the package root so the generated
-  // playwright config can resolve `@playwright/test` against the installed
-  // node_modules.
+  // baseline harness uses non-failing fixtures so passing-bundle parity stays
+  // the default; fault-injection scenarios opt in via `expectFailingSuite` so
+  // both reporters can still write complete bundles for evidence parity. The
+  // CLI must run from the package root so the generated playwright config can
+  // resolve `@playwright/test` against the installed node_modules.
   // Strip env overrides that would otherwise outrank the explicit reporter
   // options below. Both reporters resolve options through `?? env ?? default`
   // chains where an empty string still counts as defined, so unsetting the
@@ -492,11 +508,15 @@ export async function runCompatibilityFixture(
   }
   childEnv['PLAYWRIGHT_HTML_OPEN'] = 'never';
 
-  execFileSync(playwrightBin, ['test', '--config', configPath], {
-    cwd: pkgRoot,
-    stdio: 'pipe',
-    env: childEnv,
-  });
+  try {
+    execFileSync(playwrightBin, ['test', '--config', configPath], {
+      cwd: pkgRoot,
+      stdio: 'pipe',
+      env: childEnv,
+    });
+  } catch (error) {
+    if (!expectFailingSuite) throw error;
+  }
 
   const runboardReport = JSON.parse(
     await readFile(join(runboardOutputDir, 'report.json'), 'utf8'),

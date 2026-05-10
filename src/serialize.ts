@@ -3,10 +3,12 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { extname, join, relative, sep } from 'node:path';
 import type { TestCase, TestError, TestResult, TestStep } from '@playwright/test/reporter';
 import type {
+  RunboardErrorEvidence,
   RunboardLocation,
   RunboardTestAttachment,
   RunboardTestCase,
   RunboardTestCaseSummary,
+  RunboardTestErrorEvidence,
   RunboardTestResult,
   RunboardTestResultDisplayError,
   RunboardTestResultSummary,
@@ -74,7 +76,7 @@ function serializeResult(
   ctx: SerializeContext,
 ): RunboardTestResult {
   const attachments = serializeAttachments(collectAttachments(result), ctx);
-  return {
+  const out: RunboardTestResult = {
     retry: result.retry,
     startTime: result.startTime.toISOString(),
     duration: result.duration,
@@ -85,6 +87,11 @@ function serializeResult(
     annotations: (result.annotations ?? []).map((a) => ({ ...a })),
     workerIndex: result.workerIndex,
   };
+  const evidence = formatEvidenceEntries(test, result, ctx);
+  if (evidence.length > 0) {
+    out.runboard = { evidence };
+  }
+  return out;
 }
 
 function summarizeResult(result: TestResult, ctx: SerializeContext): RunboardTestResultSummary {
@@ -169,6 +176,167 @@ function serializeStep(
   if (!ctx.noSnippets && step.location !== undefined) {
     const snippet = readSourceSnippet(step.location.file, step.location.line, step.location.column);
     if (snippet !== undefined) out.snippet = snippet;
+  }
+  return out;
+}
+
+interface StepLinkage {
+  stepPath: string[];
+  stepCategory: string;
+  attachmentIndexes: number[];
+}
+
+interface StepLinkageEntry {
+  key: string;
+  linkage: StepLinkage;
+}
+
+// Real Playwright serializes `step.error` and the corresponding entry in
+// `result.errors[]` as separate TestError objects across the worker→main IPC
+// boundary, so reference identity cannot associate an error with the step
+// that recorded it. The structural key combines fields that survive
+// serialization unchanged (message/stack/value/location). The queue is built
+// in post-order (children before parent) so when Playwright records the same
+// `step.error` on every step on the failing call stack, the deepest match is
+// consumed first; sibling order is preserved so two siblings emitting
+// structurally-equal errors each receive their own linkage. Attachments are
+// collected from the matching step's whole subtree because Playwright sets
+// `step.error` on outer test.step boundaries while attachments captured
+// during the failure (e.g. screenshots) live on inner pw:api / test.step
+// children — strict per-step `step.attachments` would drop them entirely.
+function buildStepLinkageQueue(result: TestResult): StepLinkageEntry[] {
+  const out: StepLinkageEntry[] = [];
+  function walk(step: TestStep, parents: readonly string[]): void {
+    const path = [...parents, step.title];
+    for (const child of step.steps) walk(child, path);
+    if (step.error) {
+      out.push({
+        key: stepLinkageKey(step.error),
+        linkage: {
+          stepPath: path,
+          stepCategory: step.category,
+          attachmentIndexes: collectSubtreeAttachmentIndexes(step, result.attachments),
+        },
+      });
+    }
+  }
+  for (const step of result.steps) walk(step, []);
+  return out;
+}
+
+function collectSubtreeAttachmentIndexes(
+  step: TestStep,
+  resultAttachments: readonly TestResult['attachments'][number][],
+): number[] {
+  const seen = new Set<number>();
+  const out: number[] = [];
+  function visit(current: TestStep): void {
+    for (const attachment of current.attachments) {
+      const index = resultAttachments.indexOf(attachment);
+      if (index < 0 || seen.has(index)) continue;
+      seen.add(index);
+      out.push(index);
+    }
+    for (const child of current.steps) visit(child);
+  }
+  visit(step);
+  return out;
+}
+
+function stepLinkageKey(error: TestError): string {
+  const location = error.location
+    ? `${error.location.file}:${error.location.line}:${error.location.column}`
+    : '';
+  return JSON.stringify([error.message ?? '', error.stack ?? '', error.value ?? '', location]);
+}
+
+function consumeStepLinkage(queue: StepLinkageEntry[], error: TestError): StepLinkage | undefined {
+  const key = stepLinkageKey(error);
+  // The queue is post-order, so the first matching entry is the deepest step
+  // on the failing call stack — Playwright propagates the same `step.error`
+  // up through every parent test.step boundary, leaving an ancestor chain of
+  // structurally-equal entries. Use the deepest entry's stepPath /
+  // stepCategory (the test step that actually threw) and union attachment
+  // indexes across the chain so attachments captured at any level of the
+  // failing path (e.g. testInfo.attach() inside an inner step that produces
+  // a `test.attach` child step) are surfaced on the evidence linkage.
+  const deepestIndex = queue.findIndex((entry) => entry.key === key);
+  if (deepestIndex < 0) return undefined;
+  const deepest = queue[deepestIndex];
+  if (!deepest) return undefined;
+
+  const ancestorIndexes: number[] = [];
+  for (let i = 0; i < queue.length; i++) {
+    if (i === deepestIndex) continue;
+    const candidate = queue[i];
+    if (!candidate || candidate.key !== key) continue;
+    if (isStepPathStrictPrefix(candidate.linkage.stepPath, deepest.linkage.stepPath)) {
+      ancestorIndexes.push(i);
+    }
+  }
+
+  const attachmentIndexes = new Set<number>(deepest.linkage.attachmentIndexes);
+  for (const i of ancestorIndexes) {
+    const ancestor = queue[i];
+    if (!ancestor) continue;
+    for (const idx of ancestor.linkage.attachmentIndexes) attachmentIndexes.add(idx);
+  }
+
+  for (const i of [deepestIndex, ...ancestorIndexes].sort((a, b) => b - a)) {
+    queue.splice(i, 1);
+  }
+
+  return {
+    stepPath: deepest.linkage.stepPath,
+    stepCategory: deepest.linkage.stepCategory,
+    attachmentIndexes: [...attachmentIndexes].sort((a, b) => a - b),
+  };
+}
+
+function isStepPathStrictPrefix(prefix: readonly string[], full: readonly string[]): boolean {
+  if (prefix.length >= full.length) return false;
+  for (let i = 0; i < prefix.length; i++) {
+    if (prefix[i] !== full[i]) return false;
+  }
+  return true;
+}
+
+function buildTestErrorEvidence(
+  error: TestError,
+  ctx: SerializeContext,
+  queue: StepLinkageEntry[],
+): RunboardTestErrorEvidence {
+  const out: RunboardTestErrorEvidence = { source: 'test-error' };
+  if (error.message !== undefined) out.message = error.message;
+  if (error.stack !== undefined) out.stack = error.stack;
+  if (error.value !== undefined) out.value = error.value;
+  if (error.snippet !== undefined) out.snippet = error.snippet;
+  if (error.location !== undefined) out.location = relativeLocation(ctx.rootDir, error.location);
+  if (error.cause) out.cause = buildTestErrorEvidence(error.cause, ctx, queue);
+  const link = consumeStepLinkage(queue, error);
+  if (link) {
+    out.stepPath = link.stepPath;
+    out.stepCategory = link.stepCategory;
+    if (link.attachmentIndexes.length > 0) out.attachmentIndexes = link.attachmentIndexes;
+  }
+  return out;
+}
+
+function formatEvidenceEntries(
+  test: TestCase,
+  result: TestResult,
+  ctx: SerializeContext,
+): RunboardErrorEvidence[] {
+  const out: RunboardErrorEvidence[] = [];
+  if (result.status === 'passed' && test.expectedStatus === 'failed') {
+    out.push({ source: 'status-derived', message: 'Expected to fail, but passed.' });
+  }
+  if (result.status === 'interrupted') {
+    out.push({ source: 'status-derived', message: 'Test was interrupted.' });
+  }
+  const queue = buildStepLinkageQueue(result);
+  for (const error of result.errors ?? []) {
+    out.push(buildTestErrorEvidence(error, ctx, queue));
   }
   return out;
 }
