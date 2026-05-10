@@ -63,8 +63,10 @@ const EXPECTED_PARITY_FAILURES: ReadonlySet<number> = new Set<number>([
   // serializer-only, so anything richer than a status-derived message is
   // expected to mismatch). Issues #35–#46 will drop their IDs as parity
   // lands. Issue #35 dropped catalog IDs 1, 8, 9 (test/hook/global timeouts).
-  2, 3, 4, 5, 6, 7, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29,
-  30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44,
+  // Issue #36 dropped catalog IDs 2, 3, 5, 6, 7 (action, navigation, and wait
+  // timeouts).
+  4, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33,
+  34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44,
 ]);
 
 test.describe('Error Catalog — Display Error parity', () => {
