@@ -51,6 +51,33 @@ export type ExtraAssertion = (ctx: {
   view: CatalogResultView;
 }) => void | Promise<void>;
 
+function findStepByTitle(
+  steps: ReadonlyArray<Record<string, unknown>>,
+  title: string,
+): Record<string, unknown> | undefined {
+  for (const step of steps) {
+    if (step['title'] === title) return step;
+    const nested = (step['steps'] as Array<Record<string, unknown>> | undefined) ?? [];
+    const found = findStepByTitle(nested, title);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+function collectStepTitles(steps: ReadonlyArray<Record<string, unknown>>): string[] {
+  const out: string[] = [];
+  function walk(list: ReadonlyArray<Record<string, unknown>>): void {
+    for (const step of list) {
+      const title = step['title'];
+      if (typeof title === 'string') out.push(title);
+      const nested = (step['steps'] as Array<Record<string, unknown>> | undefined) ?? [];
+      walk(nested);
+    }
+  }
+  walk(steps);
+  return out;
+}
+
 const PW = `import { test, expect } from '@playwright/test';`;
 const PW_NO_EXPECT = `import { test } from '@playwright/test';`;
 
@@ -696,14 +723,48 @@ export const ERROR_CATALOG_FIXTURES: readonly ErrorCatalogFixture[] = [
       '',
     ].join('\n'),
     extraAssertion: ({ view }) => {
+      // Issue #44 acceptance criterion: "Step context in Structured Error
+      // Evidence remains index-aligned with the corresponding Display Error."
+      // Pin the alignment by length-equality and by checking evidence[0]
+      // carries the same throw text as errors[0] before reading the step
+      // metadata. A regression that dropped the evidence entry, mis-ordered
+      // it, or attached `stepPath`/`stepCategory` to the wrong evidence index
+      // would now surface as an explicit catalog failure.
+      const errors = (view.result['errors'] as Array<{ message?: string }> | undefined) ?? [];
       const evidence =
         (view.result['runboard'] as { evidence?: Array<Record<string, unknown>> } | undefined)
           ?.evidence ?? [];
-      const [primary] = evidence;
-      const stepPath = primary?.['stepPath'] as string[] | undefined;
+      if (errors.length !== evidence.length) {
+        throw new Error(
+          `expected result.errors.length === result.runboard.evidence.length; ` +
+            `got errors=${errors.length}, evidence=${evidence.length}`,
+        );
+      }
+      if (errors.length !== 1) {
+        throw new Error(`expected exactly one Display Error; got ${errors.length}`);
+      }
+      const [primaryError] = errors;
+      const [primaryEvidence] = evidence;
+      const errorMessage = primaryError?.message ?? '';
+      const evidenceMessage = (primaryEvidence?.['message'] as string | undefined) ?? '';
+      const throwText = 'inside test.step open settings: boom';
+      if (!errorMessage.includes(throwText) || !evidenceMessage.includes(throwText)) {
+        throw new Error(
+          `expected errors[0] and evidence[0] to share the throw text ${JSON.stringify(throwText)}; ` +
+            `got errors[0].message=${JSON.stringify(errorMessage)}, ` +
+            `evidence[0].message=${JSON.stringify(evidenceMessage)}`,
+        );
+      }
+      const stepPath = primaryEvidence?.['stepPath'] as string[] | undefined;
       if (!stepPath?.includes('open settings')) {
         throw new Error(
-          `expected stepPath to include 'open settings'; got ${JSON.stringify(primary)}`,
+          `expected stepPath to include 'open settings'; got ${JSON.stringify(primaryEvidence)}`,
+        );
+      }
+      const stepCategory = primaryEvidence?.['stepCategory'] as string | undefined;
+      if (stepCategory !== 'test.step') {
+        throw new Error(
+          `expected evidence[0].stepCategory === 'test.step'; got ${JSON.stringify(stepCategory)}`,
         );
       }
     },
@@ -724,6 +785,73 @@ export const ERROR_CATALOG_FIXTURES: readonly ErrorCatalogFixture[] = [
       `});`,
       '',
     ].join('\n'),
+    extraAssertion: ({ view }) => {
+      // Issue #44 acceptance criteria gated here:
+      //  1. Skipped-step structure: `test.step.skip('seeded data', …)` must
+      //     surface in `result.steps[]` as a step titled 'seeded data
+      //     (skipped)' with `skipped: true`. Playwright's HTML reporter
+      //     produces the same shape (see html.ts `_createTestStep`), so this
+      //     is the parity check the focused Display Error comparator cannot
+      //     enforce.
+      //  2. Downstream marker is body-level: the throw runs outside any
+      //     `test.step(...)` callback, so `evidence[0]` must NOT carry
+      //     `stepPath`/`stepCategory`. A regression that synthesized a fake
+      //     step path would now fail this assertion.
+      //  3. Evidence index alignment: `evidence.length` matches `errors.length`
+      //     and `evidence[0]` shares the marker text with `errors[0]`.
+      const steps = (view.result['steps'] as Array<Record<string, unknown>> | undefined) ?? [];
+      const skippedStep = findStepByTitle(steps, 'seeded data (skipped)');
+      if (!skippedStep) {
+        throw new Error(
+          `expected a serialized step titled 'seeded data (skipped)'; got titles ${JSON.stringify(
+            collectStepTitles(steps),
+          )}`,
+        );
+      }
+      if (skippedStep['skipped'] !== true) {
+        throw new Error(
+          `expected the 'seeded data (skipped)' step to carry skipped: true; got ${JSON.stringify(
+            skippedStep,
+          )}`,
+        );
+      }
+
+      const errors = (view.result['errors'] as Array<{ message?: string }> | undefined) ?? [];
+      const evidence =
+        (view.result['runboard'] as { evidence?: Array<Record<string, unknown>> } | undefined)
+          ?.evidence ?? [];
+      if (errors.length !== evidence.length) {
+        throw new Error(
+          `expected result.errors.length === result.runboard.evidence.length; ` +
+            `got errors=${errors.length}, evidence=${evidence.length}`,
+        );
+      }
+      if (errors.length !== 1) {
+        throw new Error(`expected exactly one Display Error; got ${errors.length}`);
+      }
+      const [primaryError] = errors;
+      const [primaryEvidence] = evidence;
+      const errorMessage = primaryError?.message ?? '';
+      const evidenceMessage = (primaryEvidence?.['message'] as string | undefined) ?? '';
+      const markerText = 'step-skip-downstream-marker';
+      if (!errorMessage.includes(markerText) || !evidenceMessage.includes(markerText)) {
+        throw new Error(
+          `expected errors[0] and evidence[0] to share the marker text ${JSON.stringify(markerText)}; ` +
+            `got errors[0].message=${JSON.stringify(errorMessage)}, ` +
+            `evidence[0].message=${JSON.stringify(evidenceMessage)}`,
+        );
+      }
+      if (primaryEvidence && 'stepPath' in primaryEvidence) {
+        throw new Error(
+          `expected body-level marker evidence to omit stepPath; got ${JSON.stringify(primaryEvidence)}`,
+        );
+      }
+      if (primaryEvidence && 'stepCategory' in primaryEvidence) {
+        throw new Error(
+          `expected body-level marker evidence to omit stepCategory; got ${JSON.stringify(primaryEvidence)}`,
+        );
+      }
+    },
   },
   {
     id: 41,
