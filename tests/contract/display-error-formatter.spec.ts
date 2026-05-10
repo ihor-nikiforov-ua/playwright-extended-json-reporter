@@ -532,6 +532,70 @@ test.describe('Display Error Formatter — public boundary', () => {
     expect(error.message).toContain('    at /repo/tests/actionability.spec.ts:5:34');
   });
 
+  test('web-first assertion preserves matcher hint, Locator/Expected/Received/Timeout, and Call log (catalog #4, #18–#20, #22, #23)', () => {
+    // Catalog rows 4 (web-first assertion timeout), 18 (toHaveText), 19
+    // (toContainText), 20 (toHaveValue), 22 (toHaveCount), and 23 (toHaveURL /
+    // toHaveTitle) share Playwright's web-first assertion failure shape: a
+    // matcher-hint headline, a structured Locator/Expected/Received/Timeout
+    // block, and a Call log with the matcher-driven retry lines. The full
+    // multi-line content is embedded in `error.message` and again at the head
+    // of `error.stack` before the first `    at ` frame. The formatter must
+    // keep the structured block and Call log in the Display Error message
+    // exactly once — a regression that fell back to "drop only the first
+    // stack line" would re-emit the Locator/Expected/Received/Call-log lines
+    // as stack tail and render them twice.
+    const message = [
+      'Error: expect(locator).toHaveText(expected) failed',
+      '',
+      "Locator:  locator('h1')",
+      'Expected: "Welcome"',
+      'Received: "Hello"',
+      'Timeout:  100ms',
+      '',
+      'Call log:',
+      '  - Expect "toHaveText" with timeout 100ms',
+      "  - waiting for locator('h1')",
+      '    2 × locator resolved to <h1>Hello</h1>',
+      '      - unexpected value "Hello"',
+      '',
+    ].join('\n');
+    const stack = `${message}\n    at /repo/tests/to-have-text.spec.ts:4:36`;
+    const run = fakeRun({
+      rootDir: '/repo',
+      files: [
+        {
+          fileName: '/repo/tests/to-have-text.spec.ts',
+          tests: [
+            {
+              title: 'toHaveText fails on text mismatch',
+              status: 'failed',
+              expectedStatus: 'passed',
+              results: [{ status: 'failed', errors: [{ message, stack }] }],
+            },
+          ],
+        },
+      ],
+    });
+    const { test: t, result } = pickTestAndResult(run);
+
+    const [error] = formatDisplayErrors(t, result);
+    if (!error) throw new Error('expected Display Error');
+
+    expect(error.message).toContain('expect(locator).toHaveText(expected) failed');
+    expect(error.message).toContain("Locator:  locator('h1')");
+    expect(error.message).toContain('Expected: "Welcome"');
+    expect(error.message).toContain('Received: "Hello"');
+    expect(error.message).toContain('Timeout:  100ms');
+    expect(error.message).toContain('Call log:');
+    expect(error.message).toContain('    2 × locator resolved to <h1>Hello</h1>');
+    expect(error.message).toContain('    at /repo/tests/to-have-text.spec.ts:4:36');
+    // Each structured line appears exactly once — duplication would surface as
+    // a parity diff against Playwright's HTML reporter for these rows.
+    expect(error.message.split('Call log:').length - 1).toBe(1);
+    expect(error.message.split('Expected: "Welcome"').length - 1).toBe(1);
+    expect(error.message.split('Received: "Hello"').length - 1).toBe(1);
+  });
+
   test('disposed-context error preserves headline and stack tail (catalog #17)', () => {
     // Catalog #17 parity: disposed-context errors ("Execution context was
     // destroyed", "JSHandle is disposed", "Frame was detached") arrive as a
