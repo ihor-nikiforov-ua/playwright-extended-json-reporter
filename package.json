@@ -34,7 +34,7 @@
     "pack:verify": "npm run build && npm pack --dry-run --ignore-scripts",
     "prepare": "lefthook install",
     "prepack": "npm run build",
-    "release-gate": "npm run verify && npm run test:catalog",
+    "release-gate": "npm run verify && npm run test:catalog -- --fail-on-flaky-tests",
     "test": "playwright test",
     "test:catalog": "playwright test --config=playwright.catalog.config.ts",
     "test:compat": "playwright test tests/compatibility",

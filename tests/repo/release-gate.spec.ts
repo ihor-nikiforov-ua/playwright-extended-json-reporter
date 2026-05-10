@@ -57,6 +57,21 @@ test.describe('Release-gate npm script', () => {
     ).toContain('npm run test:catalog');
   });
 
+  test('`release-gate` fails when a catalog test is flaky so retry behavior cannot mask a Display Error parity regression', async () => {
+    const pkg = await readPackageJson();
+    const script = pkg.scripts?.['release-gate'] ?? '';
+    // `playwright.catalog.config.ts` keeps `retries: 1` so the scheduled
+    // `error-catalog.yml` workflow absorbs the catalog row 9 globalTimeout
+    // race instead of paging on a transient flake. The release gate is
+    // stricter: a Display Error parity regression that retries to green
+    // would still be a regression, so the release path must surface flaky
+    // results as a hard failure.
+    expect(
+      script,
+      '`release-gate` must pass `--fail-on-flaky-tests` to Playwright so a flaky Display Error parity result fails the release gate even though `playwright.catalog.config.ts` retries once',
+    ).toContain('--fail-on-flaky-tests');
+  });
+
   test('canonical verify gate keeps the heavier all-45 catalog suite out of every PR', async () => {
     const pkg = await readPackageJson();
     const verify = pkg.scripts?.['verify'] ?? '';
