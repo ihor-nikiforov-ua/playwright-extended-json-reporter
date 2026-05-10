@@ -247,11 +247,15 @@ function deriveOutcome(
 }
 
 function createResult(spec: FakeTestResultSpec, retry: number): TestResult {
+  // Preserve TestError reference identity from spec to runtime so a step that
+  // shares its `error` with `result.errors[]` mirrors real Playwright (where
+  // both fields point at the same object) and downstream linkage by reference
+  // works in tests without content-equality fallbacks.
   return {
     annotations: (spec.annotations ?? []).map((a) => ({ ...a })),
     attachments: (spec.attachments ?? []) as TestResult['attachments'],
     duration: spec.duration ?? 1,
-    errors: (spec.errors ?? []).map((e) => ({ ...e })),
+    errors: spec.errors ?? [],
     parallelIndex: spec.parallelIndex ?? 0,
     retry: spec.retry ?? retry,
     startTime: spec.startTime ?? new Date(0),
@@ -274,6 +278,6 @@ function createStep(spec: FakeStepSpec): TestStep {
     annotations: (spec.annotations ?? []).map((a) => ({ ...a })),
     titlePath: () => [spec.title],
     ...(spec.location !== undefined ? { location: spec.location } : {}),
-    ...(spec.error !== undefined ? { error: { ...spec.error } } : {}),
+    ...(spec.error !== undefined ? { error: spec.error } : {}),
   } as unknown as TestStep;
 }

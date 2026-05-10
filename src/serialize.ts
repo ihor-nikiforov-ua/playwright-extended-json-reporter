@@ -3,10 +3,12 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { extname, join, relative, sep } from 'node:path';
 import type { TestCase, TestError, TestResult, TestStep } from '@playwright/test/reporter';
 import type {
+  RunboardErrorEvidence,
   RunboardLocation,
   RunboardTestAttachment,
   RunboardTestCase,
   RunboardTestCaseSummary,
+  RunboardTestErrorEvidence,
   RunboardTestResult,
   RunboardTestResultDisplayError,
   RunboardTestResultSummary,
@@ -74,7 +76,7 @@ function serializeResult(
   ctx: SerializeContext,
 ): RunboardTestResult {
   const attachments = serializeAttachments(collectAttachments(result), ctx);
-  return {
+  const out: RunboardTestResult = {
     retry: result.retry,
     startTime: result.startTime.toISOString(),
     duration: result.duration,
@@ -85,6 +87,11 @@ function serializeResult(
     annotations: (result.annotations ?? []).map((a) => ({ ...a })),
     workerIndex: result.workerIndex,
   };
+  const evidence = formatEvidenceEntries(test, result, ctx);
+  if (evidence.length > 0) {
+    out.runboard = { evidence };
+  }
+  return out;
 }
 
 function summarizeResult(result: TestResult, ctx: SerializeContext): RunboardTestResultSummary {
@@ -169,6 +176,68 @@ function serializeStep(
   if (!ctx.noSnippets && step.location !== undefined) {
     const snippet = readSourceSnippet(step.location.file, step.location.line, step.location.column);
     if (snippet !== undefined) out.snippet = snippet;
+  }
+  return out;
+}
+
+interface StepLinkage {
+  stepPath: string[];
+  stepCategory: string;
+  attachmentIndexes: number[];
+}
+
+function buildStepLinkageMap(result: TestResult): Map<TestError, StepLinkage> {
+  const linkage = new Map<TestError, StepLinkage>();
+  function walk(step: TestStep, parents: readonly string[]): void {
+    const path = [...parents, step.title];
+    if (step.error) {
+      const attachmentIndexes = step.attachments
+        .map((attachment) => result.attachments.indexOf(attachment))
+        .filter((index) => index !== -1);
+      linkage.set(step.error, { stepPath: path, stepCategory: step.category, attachmentIndexes });
+    }
+    for (const child of step.steps) walk(child, path);
+  }
+  for (const step of result.steps) walk(step, []);
+  return linkage;
+}
+
+function buildTestErrorEvidence(
+  error: TestError,
+  ctx: SerializeContext,
+  linkage: Map<TestError, StepLinkage>,
+): RunboardTestErrorEvidence {
+  const out: RunboardTestErrorEvidence = { source: 'test-error' };
+  if (error.message !== undefined) out.message = error.message;
+  if (error.stack !== undefined) out.stack = error.stack;
+  if (error.value !== undefined) out.value = error.value;
+  if (error.snippet !== undefined) out.snippet = error.snippet;
+  if (error.location !== undefined) out.location = relativeLocation(ctx.rootDir, error.location);
+  if (error.cause) out.cause = buildTestErrorEvidence(error.cause, ctx, linkage);
+  const link = linkage.get(error);
+  if (link) {
+    out.stepPath = link.stepPath;
+    out.stepCategory = link.stepCategory;
+    if (link.attachmentIndexes.length > 0) out.attachmentIndexes = link.attachmentIndexes;
+  }
+  return out;
+}
+
+function formatEvidenceEntries(
+  test: TestCase,
+  result: TestResult,
+  ctx: SerializeContext,
+): RunboardErrorEvidence[] {
+  const out: RunboardErrorEvidence[] = [];
+  if (result.status === 'passed' && test.expectedStatus === 'failed') {
+    out.push({ source: 'status-derived', message: 'Expected to fail, but passed.' });
+  }
+  if (result.status === 'interrupted') {
+    out.push({ source: 'status-derived', message: 'Test was interrupted.' });
+  }
+  const linkage = buildStepLinkageMap(result);
+  for (const error of result.errors ?? []) {
+    out.push(buildTestErrorEvidence(error, ctx, linkage));
   }
   return out;
 }
