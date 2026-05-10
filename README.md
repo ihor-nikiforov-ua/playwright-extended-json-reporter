@@ -39,3 +39,15 @@ playwright-runboard-report/
 npm install
 npm run build
 ```
+
+## Release Gate
+
+The canonical `npm run verify` gate runs on every PR and covers Biome, lint, typecheck, repo invariants, smoke tests (including Source Excerpt schema `1.1.0` contract coverage), and pack verification. It keeps PR feedback fast by skipping the heavier all-45 Error Catalog Display Error parity suite.
+
+Before publishing a release, run the release gate:
+
+```sh
+npm run release-gate
+```
+
+`npm run release-gate` chains `npm run verify` with `npm run test:catalog`, which parametrizes the Error Catalog Display Error parity suite over every Error Type. A parity failure fails the gate with a report that names the catalog ID, Error Type, and divergent fields. The same gate runs in CI through the `Release Gate` workflow on `release.published` and `workflow_dispatch`.
