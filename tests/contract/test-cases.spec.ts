@@ -1,6 +1,6 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { RunboardReporter } from '../../src/index.js';
 import { fakeFullResult, fakeRun } from '../helpers/fake-playwright.js';
@@ -272,7 +272,7 @@ test.describe('RunboardReporter — Test Case Serialization', () => {
                     },
                     {
                       title: 'skipped sibling',
-                      category: 'test.step.skipped',
+                      annotations: [{ type: 'skip' }],
                     },
                   ],
                 },
@@ -303,7 +303,7 @@ test.describe('RunboardReporter — Test Case Serialization', () => {
     expect(outer['startTime']).toBe('2026-03-03T00:00:00.000Z');
     expect(outer['duration']).toBe(17);
     expect(outer['location']).toEqual({
-      file: '/repo/tests/steps.spec.ts',
+      file: 'tests/steps.spec.ts',
       line: 11,
       column: 4,
     });
@@ -318,98 +318,112 @@ test.describe('RunboardReporter — Test Case Serialization', () => {
     expect(inner['attachments']).toEqual([1]);
 
     const skipped = steps[1] as Record<string, unknown>;
-    expect(skipped['title']).toBe('skipped sibling');
+    expect(skipped['title']).toBe('skipped sibling (skipped)');
     expect(skipped['skipped']).toBe(true);
   });
 
   test('omits step snippet when noSnippets is enabled', async () => {
-    const reporter = new RunboardReporter({ outputFolder, noSnippets: true });
-    const run = fakeRun({
-      rootDir: '/repo',
-      files: [
-        {
-          fileName: '/repo/tests/snippets.spec.ts',
-          tests: [
-            {
-              title: 'snippet test',
-              status: 'failed',
-              expectedStatus: 'passed',
-              results: [
-                {
-                  status: 'failed',
-                  steps: [
-                    {
-                      title: 'failing step',
-                      error: { message: 'boom', snippet: '> 1 | boom();' },
-                    },
-                  ],
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    });
+    const sourceRoot = await mkdtemp(join(tmpdir(), 'snip-no-'));
+    try {
+      const sourceFile = join(sourceRoot, 'tests/snip.spec.ts');
+      await mkdir(dirname(sourceFile), { recursive: true });
+      await writeFile(sourceFile, 'a;\nb;\nlocator.click();\nd;\ne;\n', 'utf8');
 
-    reporter.onBegin?.(run.config, run.rootSuite);
-    await reporter.onEnd?.(fakeFullResult({ status: 'failed' }));
+      const reporter = new RunboardReporter({ outputFolder, noSnippets: true });
+      const run = fakeRun({
+        rootDir: sourceRoot,
+        files: [
+          {
+            fileName: sourceFile,
+            tests: [
+              {
+                title: 'snippet test',
+                results: [
+                  {
+                    status: 'passed',
+                    steps: [
+                      {
+                        title: 'click',
+                        location: { file: sourceFile, line: 3, column: 1 },
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      });
 
-    const report = await readReport();
-    const [fileSummary] = report.files;
-    if (!fileSummary) throw new Error('expected file summary');
-    const fileEntry = await readFileEntry(fileSummary.fileId);
-    const [testCase] = fileEntry.tests;
-    if (!testCase) throw new Error('expected test case');
-    const [result] = testCase['results'] as Array<Record<string, unknown>>;
-    if (!result) throw new Error('expected result');
-    const [step] = result['steps'] as Array<Record<string, unknown>>;
-    if (!step) throw new Error('expected step');
-    expect(step).not.toHaveProperty('snippet');
+      reporter.onBegin?.(run.config, run.rootSuite);
+      await reporter.onEnd?.(fakeFullResult({ status: 'passed' }));
+
+      const report = await readReport();
+      const [fileSummary] = report.files;
+      if (!fileSummary) throw new Error('expected file summary');
+      const fileEntry = await readFileEntry(fileSummary.fileId);
+      const [testCase] = fileEntry.tests;
+      if (!testCase) throw new Error('expected test case');
+      const [result] = testCase['results'] as Array<Record<string, unknown>>;
+      if (!result) throw new Error('expected result');
+      const [step] = result['steps'] as Array<Record<string, unknown>>;
+      if (!step) throw new Error('expected step');
+      expect(step).not.toHaveProperty('snippet');
+    } finally {
+      await rm(sourceRoot, { recursive: true, force: true });
+    }
   });
 
-  test('includes step snippet by default', async () => {
-    const reporter = new RunboardReporter({ outputFolder });
-    const run = fakeRun({
-      rootDir: '/repo',
-      files: [
-        {
-          fileName: '/repo/tests/snippets.spec.ts',
-          tests: [
-            {
-              title: 'snippet test',
-              status: 'failed',
-              expectedStatus: 'passed',
-              results: [
-                {
-                  status: 'failed',
-                  steps: [
-                    {
-                      title: 'failing step',
-                      error: { message: 'boom', snippet: '> 1 | boom();' },
-                    },
-                  ],
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    });
+  test('generates step snippet from step.location source by default', async () => {
+    const sourceRoot = await mkdtemp(join(tmpdir(), 'snip-yes-'));
+    try {
+      const sourceFile = join(sourceRoot, 'tests/snip.spec.ts');
+      await mkdir(dirname(sourceFile), { recursive: true });
+      await writeFile(sourceFile, 'a;\nb;\nlocator.click();\nd;\ne;\n', 'utf8');
 
-    reporter.onBegin?.(run.config, run.rootSuite);
-    await reporter.onEnd?.(fakeFullResult({ status: 'failed' }));
+      const reporter = new RunboardReporter({ outputFolder });
+      const run = fakeRun({
+        rootDir: sourceRoot,
+        files: [
+          {
+            fileName: sourceFile,
+            tests: [
+              {
+                title: 'snippet test',
+                results: [
+                  {
+                    status: 'passed',
+                    steps: [
+                      {
+                        title: 'click',
+                        location: { file: sourceFile, line: 3, column: 1 },
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      });
 
-    const report = await readReport();
-    const [fileSummary] = report.files;
-    if (!fileSummary) throw new Error('expected file summary');
-    const fileEntry = await readFileEntry(fileSummary.fileId);
-    const [testCase] = fileEntry.tests;
-    if (!testCase) throw new Error('expected test case');
-    const [result] = testCase['results'] as Array<Record<string, unknown>>;
-    if (!result) throw new Error('expected result');
-    const [step] = result['steps'] as Array<Record<string, unknown>>;
-    if (!step) throw new Error('expected step');
-    expect(step['snippet']).toBe('> 1 | boom();');
+      reporter.onBegin?.(run.config, run.rootSuite);
+      await reporter.onEnd?.(fakeFullResult({ status: 'passed' }));
+
+      const report = await readReport();
+      const [fileSummary] = report.files;
+      if (!fileSummary) throw new Error('expected file summary');
+      const fileEntry = await readFileEntry(fileSummary.fileId);
+      const [testCase] = fileEntry.tests;
+      if (!testCase) throw new Error('expected test case');
+      const [result] = testCase['results'] as Array<Record<string, unknown>>;
+      if (!result) throw new Error('expected result');
+      const [step] = result['steps'] as Array<Record<string, unknown>>;
+      if (!step) throw new Error('expected step');
+      expect(step['snippet']).toContain('locator.click();');
+    } finally {
+      await rm(sourceRoot, { recursive: true, force: true });
+    }
   });
 
   test('flaky test exposes one summary entry with one summary per attempt', async () => {
@@ -566,7 +580,7 @@ test.describe('RunboardReporter — Test Case Serialization', () => {
     expect(testCase['title']).toBe('completes purchase');
     expect(testCase['projectName']).toBe('chromium');
     expect(testCase['location']).toEqual({
-      file: '/repo/tests/checkout.spec.ts',
+      file: 'tests/checkout.spec.ts',
       line: 42,
       column: 7,
     });

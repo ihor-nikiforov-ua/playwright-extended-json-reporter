@@ -40,6 +40,8 @@ export interface FakeTestResultSpec {
   attachments?: FakeAttachmentSpec[];
   steps?: FakeStepSpec[];
   annotations?: Array<{ type: string; description?: string }>;
+  stdout?: Array<string | Buffer>;
+  stderr?: Array<string | Buffer>;
 }
 
 export interface FakeTestSpec {
@@ -254,8 +256,8 @@ function createResult(spec: FakeTestResultSpec, retry: number): TestResult {
     retry: spec.retry ?? retry,
     startTime: spec.startTime ?? new Date(0),
     status: spec.status ?? 'passed',
-    stderr: [],
-    stdout: [],
+    stderr: spec.stderr ?? [],
+    stdout: spec.stdout ?? [],
     steps: (spec.steps ?? []).map((s) => createStep(s)),
     workerIndex: spec.workerIndex ?? 0,
   };

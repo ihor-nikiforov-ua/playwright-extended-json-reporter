@@ -41,6 +41,7 @@ const RUNBOARD_LOG_PREFIX = 'playwright-runboard-reporter:';
 
 export class RunboardReporter implements Reporter {
   private readonly outputFolder: string;
+  private readonly attachmentsBaseURL: string;
   private readonly reportOptions: RunboardReportOptions;
   private readonly noOpOptionsToWarn: NoOpCompatibilityOptionName[];
   private playwrightVersion = '';
@@ -54,6 +55,7 @@ export class RunboardReporter implements Reporter {
   constructor(options: RunboardReporterOptions = {}) {
     const resolved = resolveRunboardOptions(options);
     this.outputFolder = resolved.outputFolder;
+    this.attachmentsBaseURL = resolved.attachmentsBaseURL;
     this.reportOptions = resolved.reportOptions;
     this.noOpOptionsToWarn = [...resolved.noOpOptionsSupplied];
   }
@@ -187,6 +189,9 @@ export class RunboardReporter implements Reporter {
           const ctx = {
             projectName,
             fileName,
+            rootDir: this.rootDir,
+            outputFolder: resolve(this.outputFolder),
+            attachmentsBaseURL: this.attachmentsBaseURL,
             noSnippets: this.reportOptions.noSnippets ?? false,
           };
           bucket.push({
