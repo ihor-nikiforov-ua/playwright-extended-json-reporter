@@ -11,6 +11,7 @@
  * Anything outside this allowlist must produce a strict difference.
  */
 import { Buffer } from 'node:buffer';
+import { createHash } from 'node:crypto';
 import { expect, test } from '@playwright/test';
 import { type CompatibilityRun, compareCompatibility } from '../harness/compatibility-fixture.js';
 
@@ -390,6 +391,85 @@ test.describe('Normalization allowlist', () => {
       ],
     ]);
     const diffs = compareCompatibility(buildRun({ htmlFiles, runboardFiles }));
+    expect(diffs).toHaveLength(1);
+    expect(diffs[0]?.path).toContain('attachments/0/path');
+  });
+
+  test('attachments referenced by identical paths but missing bytes on one side surface a difference', () => {
+    // Regression scenario: a future change could keep emitting the right
+    // `data/<sha>.<ext>` path while failing to write the copied asset. Because
+    // Playwright derives the path from sha1(bytes), naive normalization on the
+    // HTML side returns the same string the runboard side sends through
+    // unchanged, so the comparator must instead refuse to normalize a path
+    // whose bytes are missing on either side.
+    const bytes = Buffer.from('asset-bytes-on-html-side-only');
+    const sha = createHash('sha1').update(bytes).digest('hex');
+    const sharedPath = `data/${sha}.png`;
+    const file = (path: string): Record<string, unknown> => ({
+      fileId: 'abc',
+      fileName: 'a.spec.ts',
+      tests: [
+        {
+          title: 't',
+          results: [
+            {
+              retry: 0,
+              status: 'passed',
+              attachments: [{ name: 'screenshot', contentType: 'image/png', path }],
+            },
+          ],
+        },
+      ],
+    });
+    const htmlFiles = new Map<string, Record<string, unknown>>([['abc', file(sharedPath)]]);
+    const runboardFiles = new Map<string, Record<string, unknown>>([['abc', file(sharedPath)]]);
+    const htmlAttachments = new Map<string, Buffer>([[`${sha}.png`, bytes]]);
+    const runboardAttachments = new Map<string, Buffer>();
+    const diffs = compareCompatibility(
+      buildRun({ htmlFiles, runboardFiles, htmlAttachments, runboardAttachments }),
+    );
+    expect(diffs).toHaveLength(1);
+    expect(diffs[0]?.path).toContain('attachments/0/path');
+  });
+
+  test('non-default attachmentsBaseURL is honored when normalizing attachment paths', () => {
+    // Issue #5: `attachmentsBaseURL` controls where the report references
+    // copied assets. The comparator must therefore match attachment paths
+    // against the configured prefix — not a hard-coded `data/` — so a
+    // regression that silently drops the asset under a custom prefix still
+    // surfaces a difference.
+    const bytes = Buffer.from('asset-bytes-with-custom-baseurl');
+    const sha = createHash('sha1').update(bytes).digest('hex');
+    const sharedPath = `assets/${sha}.png`;
+    const file = (path: string): Record<string, unknown> => ({
+      fileId: 'abc',
+      fileName: 'a.spec.ts',
+      tests: [
+        {
+          title: 't',
+          results: [
+            {
+              retry: 0,
+              status: 'passed',
+              attachments: [{ name: 'screenshot', contentType: 'image/png', path }],
+            },
+          ],
+        },
+      ],
+    });
+    const htmlFiles = new Map<string, Record<string, unknown>>([['abc', file(sharedPath)]]);
+    const runboardFiles = new Map<string, Record<string, unknown>>([['abc', file(sharedPath)]]);
+    const htmlAttachments = new Map<string, Buffer>([[`${sha}.png`, bytes]]);
+    const runboardAttachments = new Map<string, Buffer>();
+    const diffs = compareCompatibility(
+      buildRun({
+        htmlFiles,
+        runboardFiles,
+        htmlAttachments,
+        runboardAttachments,
+        attachmentsBaseURL: 'assets/',
+      }),
+    );
     expect(diffs).toHaveLength(1);
     expect(diffs[0]?.path).toContain('attachments/0/path');
   });
