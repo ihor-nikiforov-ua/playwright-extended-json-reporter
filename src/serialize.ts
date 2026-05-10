@@ -5,6 +5,7 @@ import type { TestCase, TestError, TestResult, TestStep } from '@playwright/test
 import type {
   RunboardErrorEvidence,
   RunboardLocation,
+  RunboardSourceExcerpt,
   RunboardTestAttachment,
   RunboardTestCase,
   RunboardTestCaseSummary,
@@ -319,7 +320,41 @@ function buildTestErrorEvidence(
     out.stepCategory = link.stepCategory;
     if (link.attachmentIndexes.length > 0) out.attachmentIndexes = link.attachmentIndexes;
   }
+  if (!ctx.noSnippets && error.location !== undefined) {
+    const excerpt = buildSourceExcerpt(error.location, ctx);
+    if (excerpt) out.sourceExcerpt = excerpt;
+  }
   return out;
+}
+
+function buildSourceExcerpt(
+  location: { file: string; line: number; column: number },
+  ctx: SerializeContext,
+): RunboardSourceExcerpt | undefined {
+  let source: string;
+  try {
+    source = readFileSync(location.file, 'utf8');
+  } catch {
+    return undefined;
+  }
+  const allLines = source.split('\n');
+  // A trailing newline produces an empty terminator element from split('\n');
+  // drop it so line counts and clipping reflect the file's actual line content.
+  if (allLines.length > 0 && allLines[allLines.length - 1] === '' && source.endsWith('\n')) {
+    allLines.pop();
+  }
+  if (location.line < 1 || location.line > allLines.length) return undefined;
+  const startLine = Math.max(1, location.line - 2);
+  const endLine = Math.min(allLines.length, location.line + 2);
+  const lines = allLines.slice(startLine - 1, endLine);
+  const excerpt: RunboardSourceExcerpt = {
+    file: toPosixPath(relative(ctx.rootDir, location.file)),
+    startLine,
+    lines,
+    highlightedLine: location.line,
+  };
+  if (location.column > 0) excerpt.highlightedColumn = location.column;
+  return excerpt;
 }
 
 function formatEvidenceEntries(

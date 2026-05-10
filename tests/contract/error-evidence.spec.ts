@@ -1,6 +1,6 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { RunboardReporter } from '../../src/index.js';
 import { fakeFullResult, fakeRun } from '../helpers/fake-playwright.js';
@@ -492,6 +492,341 @@ test.describe('RunboardReporter — Structured Error Evidence', () => {
     expect(evidence).not.toHaveProperty('stepPath');
     expect(evidence).not.toHaveProperty('stepCategory');
     expect(evidence).not.toHaveProperty('attachmentIndexes');
+  });
+
+  test('evidence with location attaches a Source Excerpt with default ±2 line range', async () => {
+    const sourceRoot = await mkdtemp(join(tmpdir(), 'runboard-excerpt-'));
+    try {
+      const sourceFile = join(sourceRoot, 'tests/excerpt.spec.ts');
+      await mkdir(dirname(sourceFile), { recursive: true });
+      // Lines:        1   2   3            4              5   6   7
+      const lines = ['a;', 'b;', 'c;', 'expect(1).toBe(2);', 'd;', 'e;', 'f;'];
+      await writeFile(sourceFile, `${lines.join('\n')}\n`, 'utf8');
+
+      const reporter = new RunboardReporter({ outputFolder });
+      const run = fakeRun({
+        rootDir: sourceRoot,
+        files: [
+          {
+            fileName: sourceFile,
+            tests: [
+              {
+                title: 'fails on line 4',
+                status: 'failed',
+                expectedStatus: 'passed',
+                results: [
+                  {
+                    status: 'failed',
+                    errors: [
+                      {
+                        message: 'Expected 1 to be 2',
+                        location: { file: sourceFile, line: 4, column: 8 },
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+
+      reporter.onBegin?.(run.config, run.rootSuite);
+      await reporter.onEnd?.(fakeFullResult({ status: 'failed' }));
+
+      const result = await readResult();
+      const runboard = result['runboard'] as { evidence: Array<Record<string, unknown>> };
+      const [evidence] = runboard.evidence;
+      const excerpt = evidence?.['sourceExcerpt'] as Record<string, unknown> | undefined;
+      expect(excerpt).toBeDefined();
+      expect(excerpt?.['file']).toBe('tests/excerpt.spec.ts');
+      expect(excerpt?.['startLine']).toBe(2);
+      expect(excerpt?.['highlightedLine']).toBe(4);
+      expect(excerpt?.['highlightedColumn']).toBe(8);
+      expect(excerpt?.['lines']).toEqual(['b;', 'c;', 'expect(1).toBe(2);', 'd;', 'e;']);
+    } finally {
+      await rm(sourceRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('Source Excerpt clips at file start when highlight is near the top', async () => {
+    const sourceRoot = await mkdtemp(join(tmpdir(), 'runboard-excerpt-top-'));
+    try {
+      const sourceFile = join(sourceRoot, 'tests/top.spec.ts');
+      await mkdir(dirname(sourceFile), { recursive: true });
+      const lines = ['line1;', 'line2;', 'line3;', 'line4;', 'line5;'];
+      await writeFile(sourceFile, `${lines.join('\n')}\n`, 'utf8');
+
+      const reporter = new RunboardReporter({ outputFolder });
+      const run = fakeRun({
+        rootDir: sourceRoot,
+        files: [
+          {
+            fileName: sourceFile,
+            tests: [
+              {
+                title: 'fails on line 1',
+                status: 'failed',
+                expectedStatus: 'passed',
+                results: [
+                  {
+                    status: 'failed',
+                    errors: [
+                      {
+                        message: 'boom',
+                        location: { file: sourceFile, line: 1, column: 1 },
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+
+      reporter.onBegin?.(run.config, run.rootSuite);
+      await reporter.onEnd?.(fakeFullResult({ status: 'failed' }));
+
+      const result = await readResult();
+      const runboard = result['runboard'] as { evidence: Array<Record<string, unknown>> };
+      const [evidence] = runboard.evidence;
+      const excerpt = evidence?.['sourceExcerpt'] as Record<string, unknown> | undefined;
+      expect(excerpt?.['startLine']).toBe(1);
+      expect(excerpt?.['highlightedLine']).toBe(1);
+      expect(excerpt?.['lines']).toEqual(['line1;', 'line2;', 'line3;']);
+    } finally {
+      await rm(sourceRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('Source Excerpt clips at file end when highlight is near the bottom', async () => {
+    const sourceRoot = await mkdtemp(join(tmpdir(), 'runboard-excerpt-bottom-'));
+    try {
+      const sourceFile = join(sourceRoot, 'tests/bottom.spec.ts');
+      await mkdir(dirname(sourceFile), { recursive: true });
+      const lines = ['line1;', 'line2;', 'line3;'];
+      await writeFile(sourceFile, `${lines.join('\n')}\n`, 'utf8');
+
+      const reporter = new RunboardReporter({ outputFolder });
+      const run = fakeRun({
+        rootDir: sourceRoot,
+        files: [
+          {
+            fileName: sourceFile,
+            tests: [
+              {
+                title: 'fails on last line',
+                status: 'failed',
+                expectedStatus: 'passed',
+                results: [
+                  {
+                    status: 'failed',
+                    errors: [
+                      {
+                        message: 'boom',
+                        location: { file: sourceFile, line: 3, column: 1 },
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+
+      reporter.onBegin?.(run.config, run.rootSuite);
+      await reporter.onEnd?.(fakeFullResult({ status: 'failed' }));
+
+      const result = await readResult();
+      const runboard = result['runboard'] as { evidence: Array<Record<string, unknown>> };
+      const [evidence] = runboard.evidence;
+      const excerpt = evidence?.['sourceExcerpt'] as Record<string, unknown> | undefined;
+      expect(excerpt?.['startLine']).toBe(1);
+      expect(excerpt?.['highlightedLine']).toBe(3);
+      expect(excerpt?.['lines']).toEqual(['line1;', 'line2;', 'line3;']);
+    } finally {
+      await rm(sourceRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('Source Excerpt is omitted when source file cannot be read', async () => {
+    const reporter = new RunboardReporter({ outputFolder });
+    const run = fakeRun({
+      rootDir: '/repo',
+      files: [
+        {
+          fileName: '/repo/tests/missing.spec.ts',
+          tests: [
+            {
+              title: 'fails with location pointing at a non-existent file',
+              status: 'failed',
+              expectedStatus: 'passed',
+              results: [
+                {
+                  status: 'failed',
+                  errors: [
+                    {
+                      message: 'boom',
+                      location: {
+                        file: '/repo/tests/does-not-exist-on-disk.spec.ts',
+                        line: 5,
+                        column: 1,
+                      },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    reporter.onBegin?.(run.config, run.rootSuite);
+    await reporter.onEnd?.(fakeFullResult({ status: 'failed' }));
+
+    const result = await readResult();
+    const runboard = result['runboard'] as { evidence: Array<Record<string, unknown>> };
+    const [evidence] = runboard.evidence;
+    expect(evidence).not.toHaveProperty('sourceExcerpt');
+  });
+
+  test('Source Excerpt is omitted when evidence has no location', async () => {
+    const reporter = new RunboardReporter({ outputFolder });
+    const run = fakeRun({
+      rootDir: '/repo',
+      files: [
+        {
+          fileName: '/repo/tests/no-location.spec.ts',
+          tests: [
+            {
+              title: 'fails without location',
+              status: 'failed',
+              expectedStatus: 'passed',
+              results: [{ status: 'failed', errors: [{ message: 'no location attached' }] }],
+            },
+          ],
+        },
+      ],
+    });
+
+    reporter.onBegin?.(run.config, run.rootSuite);
+    await reporter.onEnd?.(fakeFullResult({ status: 'failed' }));
+
+    const result = await readResult();
+    const runboard = result['runboard'] as { evidence: Array<Record<string, unknown>> };
+    const [evidence] = runboard.evidence;
+    expect(evidence).not.toHaveProperty('sourceExcerpt');
+  });
+
+  test('noSnippets: true suppresses Source Excerpts even when source is readable', async () => {
+    const sourceRoot = await mkdtemp(join(tmpdir(), 'runboard-excerpt-noSnippets-'));
+    try {
+      const sourceFile = join(sourceRoot, 'tests/suppress.spec.ts');
+      await mkdir(dirname(sourceFile), { recursive: true });
+      await writeFile(sourceFile, 'a;\nb;\nc;\nd;\ne;\n', 'utf8');
+
+      const reporter = new RunboardReporter({ outputFolder, noSnippets: true });
+      const run = fakeRun({
+        rootDir: sourceRoot,
+        files: [
+          {
+            fileName: sourceFile,
+            tests: [
+              {
+                title: 'fails with readable source but noSnippets enabled',
+                status: 'failed',
+                expectedStatus: 'passed',
+                results: [
+                  {
+                    status: 'failed',
+                    errors: [
+                      {
+                        message: 'boom',
+                        location: { file: sourceFile, line: 3, column: 1 },
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+
+      reporter.onBegin?.(run.config, run.rootSuite);
+      await reporter.onEnd?.(fakeFullResult({ status: 'failed' }));
+
+      const result = await readResult();
+      const runboard = result['runboard'] as { evidence: Array<Record<string, unknown>> };
+      const [evidence] = runboard.evidence;
+      expect(evidence).not.toHaveProperty('sourceExcerpt');
+    } finally {
+      await rm(sourceRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('Source Excerpt is attached to recursive cause evidence when cause has its own location', async () => {
+    const sourceRoot = await mkdtemp(join(tmpdir(), 'runboard-excerpt-cause-'));
+    try {
+      const outerFile = join(sourceRoot, 'tests/outer.spec.ts');
+      const causeFile = join(sourceRoot, 'lib/cause.ts');
+      await mkdir(dirname(outerFile), { recursive: true });
+      await mkdir(dirname(causeFile), { recursive: true });
+      await writeFile(outerFile, 'o1;\no2;\no3;\no4;\no5;\n', 'utf8');
+      await writeFile(causeFile, 'c1;\nc2;\nc3;\nc4;\nc5;\n', 'utf8');
+
+      const reporter = new RunboardReporter({ outputFolder });
+      const run = fakeRun({
+        rootDir: sourceRoot,
+        files: [
+          {
+            fileName: outerFile,
+            tests: [
+              {
+                title: 'fails with cause from another file',
+                status: 'failed',
+                expectedStatus: 'passed',
+                results: [
+                  {
+                    status: 'failed',
+                    errors: [
+                      {
+                        message: 'outer',
+                        location: { file: outerFile, line: 3, column: 1 },
+                        cause: {
+                          message: 'inner',
+                          location: { file: causeFile, line: 2, column: 1 },
+                        },
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+
+      reporter.onBegin?.(run.config, run.rootSuite);
+      await reporter.onEnd?.(fakeFullResult({ status: 'failed' }));
+
+      const result = await readResult();
+      const runboard = result['runboard'] as { evidence: Array<Record<string, unknown>> };
+      const [evidence] = runboard.evidence;
+      const outerExcerpt = evidence?.['sourceExcerpt'] as Record<string, unknown> | undefined;
+      expect(outerExcerpt?.['file']).toBe('tests/outer.spec.ts');
+      expect(outerExcerpt?.['highlightedLine']).toBe(3);
+
+      const cause = evidence?.['cause'] as Record<string, unknown> | undefined;
+      const causeExcerpt = cause?.['sourceExcerpt'] as Record<string, unknown> | undefined;
+      expect(causeExcerpt?.['file']).toBe('lib/cause.ts');
+      expect(causeExcerpt?.['highlightedLine']).toBe(2);
+    } finally {
+      await rm(sourceRoot, { recursive: true, force: true });
+    }
   });
 
   test('reporter does not emit reporter-side errorType classification', async () => {
