@@ -36,6 +36,7 @@
     "prepack": "npm run build",
     "test": "playwright test",
     "test:catalog": "playwright test --config=playwright.catalog.config.ts",
+    "test:compat": "playwright test tests/compatibility",
     "typecheck": "tsc --noEmit -p tsconfig.build.json && tsc --noEmit -p tsconfig.test.json && tsc --noEmit -p tsconfig.json",
     "verify": "npm run check && npm run lint && npm run typecheck && npm run invariants && npm test && npm run pack:verify"
   },
