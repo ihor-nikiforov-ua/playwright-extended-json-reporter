@@ -77,12 +77,13 @@ export function detectOutputFolderOverlaps(
   projectDirs: readonly string[],
 ): string[] {
   const absoluteOutput = resolve(outputFolder);
+  const outputPrefix = absoluteOutput.endsWith(sep) ? absoluteOutput : absoluteOutput + sep;
   const overlaps: string[] = [];
   for (const dir of projectDirs) {
     const absoluteDir = resolve(dir);
     if (absoluteOutput === absoluteDir) continue;
-    const prefix = absoluteDir.endsWith(sep) ? absoluteDir : absoluteDir + sep;
-    if (absoluteOutput.startsWith(prefix)) {
+    const dirPrefix = absoluteDir.endsWith(sep) ? absoluteDir : absoluteDir + sep;
+    if (absoluteOutput.startsWith(dirPrefix) || absoluteDir.startsWith(outputPrefix)) {
       overlaps.push(dir);
     }
   }

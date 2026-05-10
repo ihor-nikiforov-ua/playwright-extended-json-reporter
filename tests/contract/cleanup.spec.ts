@@ -237,4 +237,24 @@ test.describe('detectOutputFolderOverlaps', () => {
     ]);
     expect(overlaps).toEqual([]);
   });
+
+  test('reports the project directory when output folder is an ancestor of it', () => {
+    const projectOutputDir = '/repo/test-results/chromium';
+    const outputFolder = '/repo/test-results';
+    const overlaps = detectOutputFolderOverlaps(outputFolder, [projectOutputDir]);
+    expect(overlaps).toEqual([projectOutputDir]);
+  });
+
+  test('reports overlaps in both nesting directions across multiple project dirs', () => {
+    const insideOutput = '/repo/output/nested-artifacts';
+    const containsOutput = '/repo';
+    const unrelated = '/elsewhere/results';
+    const outputFolder = '/repo/output';
+    const overlaps = detectOutputFolderOverlaps(outputFolder, [
+      insideOutput,
+      containsOutput,
+      unrelated,
+    ]);
+    expect(overlaps).toEqual([insideOutput, containsOutput]);
+  });
 });
