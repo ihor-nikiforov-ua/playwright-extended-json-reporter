@@ -31,7 +31,7 @@ The catalog is not reporter output and is not an Error Classification schema. It
 | 6 | A. Timeouts | `waitForEvent` / request / response / load-state timeout | `while waiting for event`, `waiting for response`, `waiting for request`, or equivalent wait evidence |
 | 7 | A. Timeouts | `page.waitForFunction` timeout | `waitForFunction`, `Timeout`, and function-polling evidence |
 | 8 | A. Timeouts | Hook timeout | `"beforeAll"`, `hook timeout`, and `exceeded` |
-| 9 | A. Timeouts | Global timeout | `Timed out waiting` and `for the entire test run` |
+| 9 | A. Timeouts | Global timeout | `Timed out waiting` and `to run` |
 | 10 | B. Locator / element resolution | Strict mode violation | `strict mode violation` |
 | 11 | B. Locator / element resolution | Element is not visible | `element is not visible` |
 | 12 | B. Locator / element resolution | Element is detached from the DOM | `element was detached from the DOM` |
@@ -49,7 +49,7 @@ The catalog is not reporter output and is not an Error Classification schema. It
 | 24 | C. Web-first assertions | Attribute-shaped matcher failure | `toHaveAttribute` |
 | 25 | C. Web-first assertions | State-flag matcher failure | `toBeChecked` |
 | 26 | C. Web-first assertions | `toHaveScreenshot` failure | `toHaveScreenshot`, screenshot comparison text, pixel-diff text, or screenshot diff attachments |
-| 27 | C. Web-first assertions | Soft assertion failure | Multiple preserved soft errors for one test result plus the matcher-specific evidence |
+| 27 | C. Web-first assertions | Soft assertion failure | Multiple preserved soft errors for one test result plus matcher-specific evidence such as `toHaveText` and `toHaveCount` |
 | 28 | D. Generic value matchers | `toBe` / equality matcher failure | `toBe` and `Object.is equality` |
 | 29 | D. Generic value matchers | `toMatch` failure | `toMatch` and `Expected pattern` |
 | 30 | D. Generic value matchers | `toContain` / `toContainEqual` failure | `toContain` |
@@ -63,9 +63,9 @@ The catalog is not reporter output and is not an Error Classification schema. It
 | 38 | E. Hooks and fixtures | Worker teardown / worker process exited unexpectedly | `Worker teardown timeout`, `Failed worker ran`, or `exited unexpectedly` |
 | 39 | F. test.step failures | Error inside `test.step()` | `inside test.step open settings: boom` |
 | 40 | F. test.step failures | `test.step.skip` not running | `step-skip-downstream-marker` |
-| 41 | G. Misc | Page / target / browser context closed | `Target closed`, `Page closed`, browser-context closed text, or a closed-target API prefix |
+| 41 | G. Misc | Page / target / browser context closed | `Target page, context or browser has been closed`, `Page closed`, or a closed-target API prefix |
 | 42 | G. Misc | Network error during navigation | `net::ERR_`, `NS_ERROR_`, URL, and navigation Call log evidence |
-| 43 | G. Misc | Page crashed | `Page crashed` |
+| 43 | G. Misc | Page crashed | `Target crashed` or `Page crashed` |
 | 44 | G. Misc | Unhandled exception in page | `Synthetic crash from /crashy` |
 | 45 | G. Misc | `test.fail()` unexpectedly passed | `Expected to fail, but passed` |
 

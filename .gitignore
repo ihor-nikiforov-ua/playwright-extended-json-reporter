@@ -6,6 +6,7 @@ playwright-runboard-report/
 test-results/
 .runboard-int-*/
 .runboard-compat-*/
+.runboard-catalog-*/
 *.log
 *.tgz
 .DS_Store
