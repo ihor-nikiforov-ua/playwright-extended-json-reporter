@@ -711,10 +711,20 @@ export async function runCompatibilityFixture(
   const projectsLine = needsBrowser
     ? `  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],`
     : '';
+  // Pin the child Playwright run's `outputDir` to a workDir-scoped folder.
+  // Playwright otherwise resolves the default to `<packageJsonDir>/test-results/`,
+  // and its `clear output` startup task removes that folder wholesale (see
+  // `createRemoveOutputDirsTask`). When two parent compatibility tests run in
+  // parallel, the second child's startup wipes the first child's test-results
+  // subdir mid-run, after which the HTML reporter's `fs.readFileSync(a.path)`
+  // for path-backed attachments silently fails and leaves an absolute path in
+  // the serialized report — surfacing as a spurious Compatibility Fixture diff.
+  const childOutputDir = join(workDir, 'test-results');
   const configSource = [
     browserImports,
     `export default defineConfig({`,
     `  testDir: ${JSON.stringify(specsDir)},`,
+    `  outputDir: ${JSON.stringify(childOutputDir)},`,
     `  fullyParallel: false,`,
     ...extraConfigLines.map((line) => `  ${line}`),
     `  reporter: [`,
@@ -843,10 +853,15 @@ export async function runMergeReportsCompatibilityFixture(
     await mkdirp(shardBlobDir);
     const shardConfigPath = join(workDir, `playwright.shard-${current}.config.mjs`);
     const blobOptions = JSON.stringify({ outputDir: shardBlobDir, fileName: `report.zip` });
+    // See `runCompatibilityFixture` for the rationale: pin the child run's
+    // `outputDir` under workDir so parallel parent tests can't race on
+    // `<packageJsonDir>/test-results/` via the `clear output` startup task.
+    const shardOutputDir = join(workDir, `test-results-shard-${current}`);
     const shardConfig = [
       `import { defineConfig } from '@playwright/test';`,
       `export default defineConfig({`,
       `  testDir: ${JSON.stringify(specsDir)},`,
+      `  outputDir: ${JSON.stringify(shardOutputDir)},`,
       `  fullyParallel: false,`,
       `  workers: 1,`,
       shard.tags && shard.tags.length > 0 ? `  tag: ${JSON.stringify(shard.tags)},` : '',
