@@ -11,7 +11,7 @@
  * with shard index, tags, start time, and duration metadata per shard.
  */
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { copyFile, mkdtemp, rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, test } from '@playwright/test';
@@ -22,13 +22,40 @@ import {
 } from '../harness/compatibility-fixture.js';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const reporterDist = resolve(repoRoot, 'dist', 'runboard-reporter.js');
 
 test.describe('Compatibility Fixture — Playwright merge-reports', () => {
+  // The reporter snapshot is a private build of `dist/` for this test file
+  // alone. `playwright merge-reports` loads the reporter synchronously in the
+  // main process, so it has the smallest tolerance for a concurrent `tsc`
+  // rewrite of the shared `dist/runboard-reporter.js`; building into an
+  // isolated `--outDir` keeps the bytes stable while other test files (e.g.
+  // `built-package-smoke`, `pack-contents`, sibling compatibility specs) run
+  // their own `npm run build` in parallel.
+  //
+  // The snapshot lives inside `repoRoot` so Node's resolver walks up into
+  // `<repoRoot>/node_modules/` when the reporter imports its external deps
+  // (`@babel/code-frame`). A tmpdir-rooted snapshot would not see those
+  // packages.
+  let reporterSnapshotRoot: string;
+  let reporterDist: string;
   let workDir: string;
 
-  test.beforeAll(() => {
-    execFileSync('npm', ['run', 'build'], { cwd: repoRoot, stdio: 'inherit' });
+  test.beforeAll(async () => {
+    reporterSnapshotRoot = await mkdtemp(join(repoRoot, '.runboard-merge-snapshot-'));
+    const snapshotDistDir = join(reporterSnapshotRoot, 'dist');
+    execFileSync('npx', ['tsc', '-p', 'tsconfig.build.json', '--outDir', snapshotDistDir], {
+      cwd: repoRoot,
+      stdio: 'inherit',
+    });
+    // The reporter reads `../package.json` relative to its own location to
+    // populate `runboard.reporterVersion`, so the snapshot needs a sibling
+    // package.json alongside the isolated `dist/`.
+    await copyFile(join(repoRoot, 'package.json'), join(reporterSnapshotRoot, 'package.json'));
+    reporterDist = join(snapshotDistDir, 'runboard-reporter.js');
+  });
+
+  test.afterAll(async () => {
+    await rm(reporterSnapshotRoot, { recursive: true, force: true });
   });
 
   test.beforeEach(async () => {
@@ -43,6 +70,7 @@ test.describe('Compatibility Fixture — Playwright merge-reports', () => {
     const run = await runMergeReportsCompatibilityFixture({
       workDir,
       reporterDist,
+      pkgRoot: repoRoot,
       specs: {
         'a.spec.ts': [
           `import { expect, test } from '@playwright/test';`,

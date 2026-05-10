@@ -808,6 +808,14 @@ export interface RunMergeReportsFixtureOptions {
    * HTML reporter wired into the merge config.
    */
   shards: Array<{ tags?: string[] }>;
+  /**
+   * Override for the `cwd` and `node_modules/.bin/playwright` lookup used when
+   * invoking the Playwright CLI. Defaults to `dirname(reporterDist)/..`.
+   * Callers separate this from `reporterDist` when the reporter file lives in
+   * an isolated snapshot directory but the Playwright binary still has to be
+   * resolved against the repo's installed `node_modules`.
+   */
+  pkgRoot?: string;
 }
 
 export async function runMergeReportsCompatibilityFixture(
@@ -830,7 +838,7 @@ export async function runMergeReportsCompatibilityFixture(
     await writeFile(target, body, 'utf8');
   }
 
-  const pkgRoot = resolve(dirname(reporterDist), '..');
+  const pkgRoot = options.pkgRoot ?? resolve(dirname(reporterDist), '..');
   const playwrightBin = join(pkgRoot, 'node_modules', '.bin', 'playwright');
 
   const childEnv: NodeJS.ProcessEnv = { ...process.env, FORCE_COLOR: '0' };
