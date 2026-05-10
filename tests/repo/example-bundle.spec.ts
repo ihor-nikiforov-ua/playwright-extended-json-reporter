@@ -23,6 +23,9 @@ import { generateExampleBundle } from '../helpers/example-bundle-fixture.js';
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const exampleRoot = resolve(repoRoot, 'docs/public/examples');
 const exampleBundleRoot = resolve(exampleRoot, 'playwright-runboard-report');
+const exampleInputRoot = resolve(exampleRoot, 'playwright-input');
+const exampleInputSpec = resolve(exampleInputRoot, 'checkout.spec.ts');
+const exampleReadme = resolve(exampleRoot, 'README.md');
 
 async function listFilesRecursive(root: string): Promise<string[]> {
   const out: string[] = [];
@@ -70,6 +73,55 @@ test.describe('Public Example Bundle layout', () => {
       reportStat.isFile(),
       'docs/public/examples/playwright-runboard-report must contain report.json',
     ).toBe(true);
+  });
+
+  test('docs/public/examples/ ships an in-package Playwright input spec so packed-package consumers can inspect the input shape without repo access', async () => {
+    const inputDirStat = await stat(exampleInputRoot);
+    expect(
+      inputDirStat.isDirectory(),
+      'docs/public/examples/playwright-input must exist as a directory inside the packed package',
+    ).toBe(true);
+
+    const specStat = await stat(exampleInputSpec);
+    expect(
+      specStat.isFile(),
+      'docs/public/examples/playwright-input/checkout.spec.ts must exist so the small Playwright input is visible from the installed package',
+    ).toBe(true);
+
+    const specContents = await readFile(exampleInputSpec, 'utf8');
+    expect(
+      specContents,
+      'the in-package input must look like a Playwright spec (import @playwright/test, declare test cases)',
+    ).toContain("from '@playwright/test'");
+    expect(specContents).toMatch(/test\(/);
+  });
+
+  test('docs/public/examples/README.md references the in-package input and either uses absolute URLs or in-package relative paths for repo-only files', async () => {
+    const readme = await readFile(exampleReadme, 'utf8');
+
+    expect(
+      readme,
+      'README must point readers at the in-package illustrative Playwright input',
+    ).toContain('playwright-input/checkout.spec.ts');
+
+    const relativeLinkPattern = /\]\(((?!https?:|mailto:|#)[^)]+)\)/g;
+    const readmeDir = dirname(exampleReadme);
+    const publicRoot = resolve(repoRoot, 'docs/public');
+    const offenders: string[] = [];
+    for (const match of readme.matchAll(relativeLinkPattern)) {
+      const target = match[1];
+      if (!target) continue;
+      const targetWithoutAnchor = target.split('#')[0];
+      if (!targetWithoutAnchor || targetWithoutAnchor.length === 0) continue;
+      const resolved = resolve(readmeDir, targetWithoutAnchor);
+      if (!resolved.startsWith(publicRoot)) {
+        offenders.push(`${target} (resolves outside docs/public; would 404 in the packed package)`);
+      }
+    }
+    expect(
+      offenders,
+      'relative markdown links in docs/public/examples/README.md must resolve inside docs/public so packed-package consumers do not hit 404s; use absolute GitHub URLs for maintainer/repo-only files',
+    ).toEqual([]);
   });
 
   test('checked-in report.json carries the current schema, reporter, and Playwright versions', async () => {

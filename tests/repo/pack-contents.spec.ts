@@ -119,6 +119,13 @@ test.describe('Published package contents', () => {
   });
 
   test('does not publish any Reporter Fixture Suite files', () => {
+    // Documented illustrative inputs under docs/public/examples/ are part of
+    // the Public Example Bundle and intentionally ship in the package. The
+    // fixture-leak guard below ignores that path only; every other location
+    // is still treated as a leak surface.
+    const allowedSpecPaths: ReadonlySet<string> = new Set([
+      'docs/public/examples/playwright-input/checkout.spec.ts',
+    ]);
     const internalPathPatterns: ReadonlyArray<{ label: string; pattern: RegExp }> = [
       { label: 'tests/ directory', pattern: /^tests\// },
       { label: 'fixture spec files', pattern: /\.spec\.ts$/ },
@@ -129,7 +136,9 @@ test.describe('Published package contents', () => {
       { label: 'compiled fixture suite under dist', pattern: /^dist\/tests\// },
     ];
     for (const { label, pattern } of internalPathPatterns) {
-      const offending = packed.files.filter((f) => pattern.test(f.path)).map((f) => f.path);
+      const offending = packed.files
+        .filter((f) => pattern.test(f.path) && !allowedSpecPaths.has(f.path))
+        .map((f) => f.path);
       expect(
         offending,
         `Published tarball must not include ${label}; found: ${offending.join(', ')}`,

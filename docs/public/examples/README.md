@@ -11,6 +11,8 @@ this example shows the same layout as files.
 ```text
 docs/public/examples/
   README.md
+  playwright-input/
+    checkout.spec.ts
   playwright-runboard-report/
     report.json
     <fileId>.json
@@ -23,10 +25,11 @@ Playwright run would produce the same directory next to its
 
 ## Example input
 
-The bundle was emitted for a single Playwright test file at
-`tests/checkout.spec.ts` under a project named `chromium`, running against
-Playwright `1.59.0`. The file contains three test cases that exercise the
-shapes a Runboard ingestion layer must handle:
+The illustrative Playwright input is shipped in the package at
+[`playwright-input/checkout.spec.ts`](./playwright-input/checkout.spec.ts).
+It declares the three test cases that the bundle was emitted for, inside a
+single source file at `tests/checkout.spec.ts` under a project named
+`chromium`, running against Playwright `1.59`:
 
 - `completes purchase as a logged-in user` — a passing test that captured a
   short stdout chunk. Stdout is preserved as a `text/plain` attachment with
@@ -39,10 +42,10 @@ shapes a Runboard ingestion layer must handle:
   `outcome: 'skipped'` bucket and how skipped cases contribute to aggregate
   stats.
 
-The complete fixture lives at
-[`tests/helpers/example-bundle-fixture.ts`](../../../tests/helpers/example-bundle-fixture.ts).
-The Runboard Reporter is invoked against the fixture and emits this bundle
-verbatim — no hand-edited JSON, no schematic-only output.
+The in-package input is illustrative documentation. The byte-stable input
+the drift test regenerates from is a deterministic fixture kept inside the
+source repository and not shipped in the package; see the
+[Repository links](#repository-links) section below.
 
 ## Example output
 
@@ -66,19 +69,35 @@ Summary and the per-file Test File Entry:
 ## Freshness
 
 `playwright-runboard-report/` is generated and validated by tests, so the
-sample JSON cannot silently rot. The validation lives in
-[`tests/repo/example-bundle.spec.ts`](../../../tests/repo/example-bundle.spec.ts):
-it regenerates the bundle from the same fixture and asserts the checked-in
-files match the Runboard Reporter's current output. The validation also
-asserts that `report.runboard.schemaVersion` matches the
-`RUNBOARD_SCHEMA_VERSION` export and that `report.runboard.reporterVersion`
-matches the package version in `package.json`, so a contract or version bump
-that is not reflected in this example fails CI.
+sample JSON cannot silently rot. The validation regenerates the bundle from
+the deterministic fixture and asserts the checked-in files match the
+Runboard Reporter's current output. The validation also asserts that
+`report.runboard.schemaVersion` matches the `RUNBOARD_SCHEMA_VERSION` export
+and that `report.runboard.reporterVersion` matches the package version in
+`package.json`, so a contract or version bump that is not reflected in this
+example fails CI.
 
-If a deliberate contract change requires updating the example, run:
+## Repository links
 
-```sh
-node scripts/regenerate-example-bundle.mjs
-```
+These files drive the regeneration and validation flow above. They live in
+the source repository and are **not shipped in the package**, so the links
+point at GitHub. Installed-package consumers do not need them; they are
+relevant only to maintainers updating the example bundle.
 
-and commit the regenerated files alongside the change.
+- Deterministic fixture used to regenerate the bundle:
+  [`tests/helpers/example-bundle-fixture.ts`](https://github.com/ihor-nikiforov-ua/playwright-runboard-reporter/blob/main/tests/helpers/example-bundle-fixture.ts)
+  (repository-only).
+- Drift-validation test that fails CI when the checked-in JSON diverges
+  from the reporter's current output:
+  [`tests/repo/example-bundle.spec.ts`](https://github.com/ihor-nikiforov-ua/playwright-runboard-reporter/blob/main/tests/repo/example-bundle.spec.ts)
+  (repository-only).
+- Maintainer regenerate script:
+  [`scripts/regenerate-example-bundle.mjs`](https://github.com/ihor-nikiforov-ua/playwright-runboard-reporter/blob/main/scripts/regenerate-example-bundle.mjs)
+  (repository-only). Maintainers run it after a deliberate contract change
+  with:
+
+  ```sh
+  node scripts/regenerate-example-bundle.mjs
+  ```
+
+  and commit the regenerated files alongside the change.
