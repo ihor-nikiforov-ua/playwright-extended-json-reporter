@@ -978,4 +978,163 @@ test.describe('Display Error Formatter — public boundary', () => {
     expect(first.message).not.toContain('toHaveCount');
     expect(second.message).not.toContain('toHaveText');
   });
+
+  test('generic value matcher failures preserve matcher hint, Expected/Received, snippet caret, and stack frame (catalog #28–#31)', () => {
+    // Catalog rows 28 (toBe), 29 (toMatch), 30 (toContain), and 31 (toThrow)
+    // share Playwright's bundled-expect failure shape: an `ExpectError`
+    // (`matcherHint.js`) wraps a Jest assertion error so `error.message` is the
+    // matcher hint headline plus the matcher-specific Expected/Received block,
+    // and `error.stack` is `${name}: ${message}\n${frames}`. Playwright's
+    // internal reporter then enriches each error with `error.snippet`, a
+    // Babel-rendered codeframe whose caret pinpoints the failing column.
+    //
+    // The Display Error Formatter must keep all three signals visible exactly
+    // once in `result.errors[].message` so Runboard can show the matcher hint,
+    // value comparison, caret, and call site. A regression that re-emitted the
+    // pre-frame portion of the stack as the stack tail would render the
+    // matcher hint twice; a regression that dropped the snippet would lose the
+    // column signal that Playwright's bundled expect provides for these
+    // matchers (no Call log is available here, unlike web-first matchers).
+    //
+    // The matcher-specific signals come from the Error Catalog distinguishing
+    // signals column: `Object.is equality` (#28), `Expected pattern` (#29),
+    // `Expected substring` (#30), and `Received function did not throw` (#31).
+    interface MatcherCase {
+      catalogId: number;
+      title: string;
+      messageBody: string;
+      file: string;
+      line: number;
+      column: number;
+      caretColumn: number;
+      sourceLine: string;
+      uniqueSignals: readonly string[];
+    }
+    const cases: readonly MatcherCase[] = [
+      {
+        catalogId: 28,
+        title: 'toBe fails on equality mismatch',
+        messageBody: [
+          'expect(received).toBe(expected) // Object.is equality',
+          '',
+          'Expected: 3',
+          'Received: 2',
+        ].join('\n'),
+        file: '/repo/tests/to-be.spec.ts',
+        line: 3,
+        column: 13,
+        caretColumn: 13,
+        sourceLine: '  expect(2).toBe(3);',
+        uniqueSignals: ['toBe', 'Object.is equality', 'Expected: 3', 'Received: 2'],
+      },
+      {
+        catalogId: 29,
+        title: 'toMatch fails on regex mismatch',
+        messageBody: [
+          'expect(received).toMatch(expected)',
+          '',
+          'Expected pattern: /^foo/',
+          'Received string:  "bar"',
+        ].join('\n'),
+        file: '/repo/tests/to-match.spec.ts',
+        line: 3,
+        column: 17,
+        caretColumn: 17,
+        sourceLine: "  expect('bar').toMatch(/^foo/);",
+        uniqueSignals: ['toMatch', 'Expected pattern: /^foo/', 'Received string:  "bar"'],
+      },
+      {
+        catalogId: 30,
+        title: 'toContain fails on missing substring',
+        messageBody: [
+          'expect(received).toContain(expected) // indexOf',
+          '',
+          'Expected substring: "ready"',
+          'Received string:    "loading"',
+        ].join('\n'),
+        file: '/repo/tests/to-contain.spec.ts',
+        line: 3,
+        column: 21,
+        caretColumn: 21,
+        sourceLine: "  expect('loading').toContain('ready');",
+        uniqueSignals: [
+          'toContain',
+          'Expected substring: "ready"',
+          'Received string:    "loading"',
+        ],
+      },
+      {
+        catalogId: 31,
+        title: 'toThrow fails when the function does not throw',
+        messageBody: ['expect(received).toThrow()', '', 'Received function did not throw'].join(
+          '\n',
+        ),
+        file: '/repo/tests/to-throw.spec.ts',
+        line: 3,
+        column: 23,
+        caretColumn: 23,
+        sourceLine: '  expect(() => 1 + 1).toThrow();',
+        uniqueSignals: ['toThrow', 'Received function did not throw'],
+      },
+    ];
+
+    for (const matcherCase of cases) {
+      const headline = `Error: ${matcherCase.messageBody}`;
+      const snippet = [
+        `  1 | import { test, expect } from '@playwright/test';`,
+        `  2 | test('${matcherCase.title}', () => {`,
+        `> 3 | ${matcherCase.sourceLine}`,
+        `    | ${' '.repeat(matcherCase.caretColumn)}^`,
+        `  4 | });`,
+        `  5 |`,
+      ].join('\n');
+      const frame = `    at ${matcherCase.file}:${matcherCase.line}:${matcherCase.column}`;
+      const stack = `${headline}\n${frame}`;
+
+      const run = fakeRun({
+        rootDir: '/repo',
+        files: [
+          {
+            fileName: matcherCase.file,
+            tests: [
+              {
+                title: matcherCase.title,
+                status: 'failed',
+                expectedStatus: 'passed',
+                results: [{ status: 'failed', errors: [{ message: headline, stack, snippet }] }],
+              },
+            ],
+          },
+        ],
+      });
+      const { test: t, result } = pickTestAndResult(run);
+
+      const [error] = formatDisplayErrors(t, result);
+      if (!error) throw new Error(`expected Display Error for catalog #${matcherCase.catalogId}`);
+
+      // Headline tokens must survive verbatim — no normalization to `//`
+      // comments, no rewrite to a generic "assertion failed" shape.
+      for (const signal of matcherCase.uniqueSignals) {
+        expect(
+          error.message,
+          `catalog #${matcherCase.catalogId}: missing signal ${JSON.stringify(signal)}`,
+        ).toContain(signal);
+      }
+      // Snippet caret stays in the Display Error so the column signal Playwright's
+      // bundled expect produces for the failing token is preserved.
+      expect(error.message, `catalog #${matcherCase.catalogId}: missing snippet line`).toContain(
+        `> 3 | ${matcherCase.sourceLine}`,
+      );
+      expect(error.message).toContain(`^`);
+      // Stack frame stays as the call-site signal even though there is no Call
+      // log for generic value matchers.
+      expect(error.message).toContain(frame);
+      // Matcher hint must appear once — a regression that re-emitted the
+      // pre-frame portion of the stack as stack tail would duplicate it.
+      const matcherName = matcherCase.uniqueSignals[0];
+      if (!matcherName) throw new Error('matcher case is missing a primary signal');
+      const matcherHintFragment = `expect(received).${matcherName}`;
+      expect(error.message.split(matcherHintFragment).length - 1).toBe(1);
+    }
+  });
 });

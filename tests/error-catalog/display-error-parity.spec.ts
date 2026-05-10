@@ -92,7 +92,19 @@ const EXPECTED_PARITY_FAILURES: ReadonlySet<number> = new Set<number>([
   // and the serializer keeps `result.runboard.evidence[]` index-aligned with
   // the Display Errors, so each individual soft web-first matcher reaches
   // parity through the same partition the single-matcher catalog rows use.
-  28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44,
+  // Issue #42 dropped catalog IDs 28, 29, 30, 31 (toBe, toMatch, toContain,
+  // toThrow). Generic value matchers ride Playwright's bundled-expect
+  // pathway: `ExpectError` (`matcherHint.js`) wraps a Jest assertion error so
+  // `error.message` carries the matcher hint plus Expected/Received block,
+  // `error.stack` carries the same content followed by stack frames, and
+  // `addLocationAndSnippetToError` (`internalReporter.js`) attaches the
+  // Babel-rendered codeframe as `error.snippet`. The same `parseErrorStack`
+  // partition used for the web-first families keeps the matcher hint and
+  // Expected/Received text intact in `result.errors[].message`, so no
+  // formatter changes were needed; a contract regression test in
+  // tests/contract/display-error-formatter.spec.ts pins the shape so a future
+  // change cannot drop the matcher hint, snippet caret, or stack frame.
+  32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44,
 ]);
 
 test.describe('Error Catalog — Display Error parity', () => {
