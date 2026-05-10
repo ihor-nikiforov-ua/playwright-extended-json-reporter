@@ -1,0 +1,87 @@
+name: Playwright Compatibility
+
+# The Runboard Reporter claims an explicit Playwright Support Range
+# (`@playwright/test >=1.59 <2`). The canonical `verify` gate runs the locked
+# development Playwright version, which keeps PR feedback fast but cannot
+# detect drift at the boundaries of the support range. This workflow adds two
+# narrowly scoped gates:
+#
+# - `min-supported` runs on every PR and re-exercises the existing
+#   Compatibility Smoke Suite against the canonical lower bound (1.59) so the
+#   peer dependency claim does not slip without notice.
+# - `latest-supported` runs on a weekly schedule and on demand so latest 1.x
+#   compatibility is checked regularly without slowing down normal PRs.
+#
+# Both jobs reuse `npm run test:compat` so the gates inherit the locked-version
+# Compatibility Smoke Suite by construction.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: '0 6 * * 2'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  min-supported:
+    name: Min supported Playwright (1.59)
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Override @playwright/test to canonical lower bound
+        run: npm install --no-save --no-audit --no-fund @playwright/test@1.59
+
+      - name: Build reporter
+        run: npm run build
+
+      - name: Compatibility Smoke Suite (min supported)
+        run: npm run test:compat
+
+  latest-supported:
+    name: Latest supported Playwright (<2)
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Override @playwright/test to latest supported below 2
+        run: npm install --no-save --no-audit --no-fund '@playwright/test@<2'
+
+      - name: Build reporter
+        run: npm run build
+
+      - name: Compatibility Smoke Suite (latest supported)
+        run: npm run test:compat
