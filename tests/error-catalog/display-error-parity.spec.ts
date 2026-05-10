@@ -119,7 +119,24 @@ const EXPECTED_PARITY_FAILURES: ReadonlySet<number> = new Set<number>([
   // in tests/contract/display-error-formatter.spec.ts pins each shape so a
   // future change cannot drop the snippet, duplicate the headline, strip
   // ANSI, or synthesize a fake codeframe for the stackless worker case.
-  39, 40, 41, 42, 43, 44,
+  // Issue #44 dropped catalog IDs 39, 40 (error inside test.step,
+  // test.step.skip downstream marker). A `throw` inside a test.step
+  // callback arrives as a regular TestError on `result.errors[]` whose
+  // `error.stack` carries both the throw frame and the test.step boundary
+  // frame, with `error.snippet` pinned to the throw line and structural
+  // step context (`stepPath`, `stepCategory`) traveling on the
+  // index-aligned `result.runboard.evidence[]` entry. The downstream
+  // marker pattern after `test.step.skip(...)` arrives as an ordinary
+  // body-level TestError (no step boundary frame, no stepPath) while the
+  // skipped step itself surfaces on `result.steps[].skipped`. Both shapes
+  // round-trip through the same generic headline + snippet + stack-tail
+  // partition the hook/fixture rows already use, so no formatter changes
+  // were needed; contract regression tests in
+  // tests/contract/display-error-formatter.spec.ts pin both shapes so a
+  // future change cannot drop the snippet, collapse the test.step
+  // boundary frame into the throw frame, or synthesize a fake stepPath
+  // for the body-level marker.
+  41, 42, 43, 44,
 ]);
 
 test.describe('Error Catalog — Display Error parity', () => {

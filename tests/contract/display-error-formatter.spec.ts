@@ -1348,4 +1348,195 @@ test.describe('Display Error Formatter — public boundary', () => {
     expect(error.message).toBe(headline);
     expect(error.codeframe).toBeUndefined();
   });
+
+  test('test.step error preserves headline, snippet, and the full stack tail across step boundaries (catalog #39)', async () => {
+    // Catalog #39 parity: when a `throw new Error(...)` fires inside a
+    // `test.step(...)` callback, Playwright records the failure as a regular
+    // TestError on `result.errors[]` whose `error.stack` carries two frames —
+    // the throw site (line of the `throw`) and the `test.step(...)` call site
+    // — and whose `error.snippet` is the Babel codeframe at the throw line.
+    // The Display Error must keep both stack frames intact so Runboard can
+    // surface the test.step boundary that recorded the error in addition to
+    // the underlying throw, and must place the snippet between the headline
+    // and the stack tail exactly once. The structural step path travels on
+    // `result.runboard.evidence[].stepPath` (proved by the catalog fixture's
+    // `extraAssertion`); this contract test pins the human-facing Display
+    // Error shape that pairs with that evidence.
+    const scratchRoot = await mkdtemp(join(tmpdir(), 'display-error-formatter-'));
+    try {
+      const sourceFile = join(scratchRoot, 'tests/step-error.spec.ts');
+      await mkdir(dirname(sourceFile), { recursive: true });
+      const source = [
+        "import { test } from '@playwright/test';",
+        "test('error inside test.step preserves stepPath', async () => {",
+        "  await test.step('open settings', async () => {",
+        "    throw new Error('inside test.step open settings: boom');",
+        '  });',
+        '});',
+        '',
+      ].join('\n');
+      await writeFile(sourceFile, source, 'utf8');
+
+      const headline = 'Error: inside test.step open settings: boom';
+      const snippet = [
+        "  2 | test('error inside test.step preserves stepPath', async () => {",
+        "  3 |   await test.step('open settings', async () => {",
+        "> 4 |     throw new Error('inside test.step open settings: boom');",
+        '    |           ^',
+        '  5 |   });',
+        '  6 | });',
+        '  7 |',
+      ].join('\n');
+      const stepBoundaryFrame = `    at ${sourceFile}:3:3`;
+      const throwFrame = `    at ${sourceFile}:4:11`;
+      const stack = `${headline}\n${throwFrame}\n${stepBoundaryFrame}`;
+
+      const run = fakeRun({
+        rootDir: scratchRoot,
+        files: [
+          {
+            fileName: sourceFile,
+            tests: [
+              {
+                title: 'error inside test.step preserves stepPath',
+                status: 'failed',
+                expectedStatus: 'passed',
+                results: [
+                  {
+                    status: 'failed',
+                    errors: [
+                      {
+                        message: headline,
+                        stack,
+                        snippet,
+                        location: { file: sourceFile, line: 4, column: 11 },
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+      const { test: t, result } = pickTestAndResult(run);
+
+      const [error] = formatDisplayErrors(t, result);
+      if (!error) throw new Error('expected Display Error for catalog #39');
+
+      expect(error.message).toContain(headline);
+      expect(error.message).toContain(
+        "> 4 |     throw new Error('inside test.step open settings: boom');",
+      );
+      expect(error.message).toContain(throwFrame);
+      // The test.step boundary frame must survive — losing it would strip the
+      // step-recording call site from the Display Error and diverge from
+      // Playwright's HTML reporter, which preserves both frames.
+      expect(error.message).toContain(stepBoundaryFrame);
+      // Headline appears exactly once — a regression that re-emitted the
+      // pre-frame portion of the stack as stack tail would render it twice.
+      expect(error.message.split(headline).length - 1).toBe(1);
+      // Babel-rendered codeframe is generated from `error.location` so
+      // Runboard can highlight the throw line without parsing the message.
+      expect(error.codeframe).toBeDefined();
+      expect(error.codeframe).toContain("throw new Error('inside test.step open settings: boom');");
+    } finally {
+      await rm(scratchRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('test.step.skip downstream marker preserves headline, snippet, and stack tail (catalog #40)', async () => {
+    // Catalog #40 parity: `test.step.skip(...)` records a step that is marked
+    // `skipped: true` and whose callback never runs. When downstream test code
+    // throws an error to assert that the step was indeed skipped (the
+    // catalog's "downstream marker" pattern), Playwright records that error as
+    // a regular TestError on `result.errors[]` with a normal stack that points
+    // at the throw site in the test body — there is no step boundary frame
+    // because the throw is outside any `test.step(...)` callback. The Display
+    // Error must therefore preserve the headline, snippet, and single stack
+    // frame intact; a regression that synthesized a step path or merged the
+    // skipped step's location into the stack tail would diverge from
+    // Playwright's HTML reporter for this row. The skipped-step structural
+    // signal travels on `result.steps[].skipped` (verified by the parity
+    // comparator); this contract test pins only the Display Error shape.
+    const scratchRoot = await mkdtemp(join(tmpdir(), 'display-error-formatter-'));
+    try {
+      const sourceFile = join(scratchRoot, 'tests/step-skip.spec.ts');
+      await mkdir(dirname(sourceFile), { recursive: true });
+      const source = [
+        "import { test } from '@playwright/test';",
+        "test('test.step.skip never runs and downstream marker fires', async () => {",
+        '  let stepRan = false;',
+        "  await test.step.skip('seeded data', async () => { stepRan = true; });",
+        '  if (!stepRan) {',
+        "    throw new Error('step-skip-downstream-marker triggered without preceding step.skip');",
+        '  }',
+        '});',
+        '',
+      ].join('\n');
+      await writeFile(sourceFile, source, 'utf8');
+
+      const headline = 'Error: step-skip-downstream-marker triggered without preceding step.skip';
+      const snippet = [
+        "  4 |   await test.step.skip('seeded data', async () => { stepRan = true; });",
+        '  5 |   if (!stepRan) {',
+        "> 6 |     throw new Error('step-skip-downstream-marker triggered without preceding step.skip');",
+        '    |           ^',
+        '  7 |   }',
+        '  8 | });',
+        '  9 |',
+      ].join('\n');
+      const throwFrame = `    at ${sourceFile}:6:11`;
+      const stack = `${headline}\n${throwFrame}`;
+
+      const run = fakeRun({
+        rootDir: scratchRoot,
+        files: [
+          {
+            fileName: sourceFile,
+            tests: [
+              {
+                title: 'test.step.skip never runs and downstream marker fires',
+                status: 'failed',
+                expectedStatus: 'passed',
+                results: [
+                  {
+                    status: 'failed',
+                    errors: [
+                      {
+                        message: headline,
+                        stack,
+                        snippet,
+                        location: { file: sourceFile, line: 6, column: 11 },
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+      const { test: t, result } = pickTestAndResult(run);
+
+      const [error] = formatDisplayErrors(t, result);
+      if (!error) throw new Error('expected Display Error for catalog #40');
+
+      expect(error.message).toContain(headline);
+      expect(error.message).toContain(
+        "> 6 |     throw new Error('step-skip-downstream-marker triggered without preceding step.skip');",
+      );
+      expect(error.message).toContain(throwFrame);
+      // Headline appears exactly once.
+      expect(error.message.split(headline).length - 1).toBe(1);
+      // Codeframe pins the throw line so Runboard can render the marker
+      // location without parsing the message.
+      expect(error.codeframe).toBeDefined();
+      expect(error.codeframe).toContain(
+        "throw new Error('step-skip-downstream-marker triggered without preceding step.skip');",
+      );
+    } finally {
+      await rm(scratchRoot, { recursive: true, force: true });
+    }
+  });
 });
