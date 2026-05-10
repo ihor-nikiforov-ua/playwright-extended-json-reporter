@@ -217,8 +217,8 @@ npm install
 npm run verify
 ```
 
-Before a Public Preview Release, the heavier release gate runs the all-45
-Error Catalog Display Error parity suite:
+Before a Public Preview Release, the heavier release gate runs the
+maintained Error Catalog Display Error parity suite:
 
 ```sh
 npm run release-gate

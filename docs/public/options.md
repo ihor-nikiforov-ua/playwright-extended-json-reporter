@@ -1,9 +1,13 @@
 # Options and Environment Variables
 
 The Runboard Reporter accepts a small set of options. Where an option also
-applies to Playwright's official HTML reporter, the Runboard Reporter uses
-the same option name and default. Options that only make sense for a
-rendered HTML report are accepted for compatibility but ignored.
+applies to Playwright's official HTML reporter, the Runboard Reporter
+reuses the Playwright option name; defaults are listed in the table below
+and can differ from Playwright's HTML reporter so the Runboard Data Bundle
+defaults match the Runboard output contract (for example, `outputFolder`
+defaults to `'playwright-runboard-report'`, not Playwright's
+`'playwright-report'`). Options that only make sense for a rendered HTML
+report are accepted for compatibility but ignored.
 
 This page lists the option surface and how it interacts with environment
 variables. See [API Reference](./api.md) for the TypeScript export details.
@@ -87,3 +91,35 @@ visible without interrupting the run.
 If you rely on serving, opening, or asset-inlining behavior, use
 Playwright's HTML reporter directly. The Runboard Reporter intentionally
 keeps those concerns out of scope.
+
+## CI artifact
+
+The Runboard Reporter writes a Runboard Data Bundle to disk; CI jobs
+preserve that bundle the same way they preserve any other Playwright
+artifact. Upload the bundle on every job, including failed runs, so the
+emitted JSON and copied attachment files survive after the runner is torn
+down.
+
+The example below uses GitHub Actions and the default Output Folder
+`playwright-runboard-report`:
+
+```yaml
+- name: Upload Runboard Data Bundle
+  if: always()
+  uses: actions/upload-artifact@v4
+  with:
+    name: runboard-data-bundle
+    path: playwright-runboard-report/
+    if-no-files-found: error
+```
+
+Notes:
+
+- `if: always()` runs the upload on failed jobs too. Without it, a failing
+  Playwright job would discard the bundle that explains the failure.
+- The `path:` value matches the default Output Folder. If you override
+  `outputFolder` (or `PLAYWRIGHT_RUNBOARD_OUTPUT_DIR`), update the upload
+  path to match.
+- Other CI systems use equivalent artifact-collection steps; the rule is
+  the same: archive the bundle on every run, including failures, before the
+  runner is torn down.
