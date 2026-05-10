@@ -203,7 +203,23 @@ const EXPECTED_PARITY_FAILURES: ReadonlySet<number> = new Set<number>([
   // tests/contract/display-error-formatter.spec.ts pin each shape so a
   // future change cannot drop the snippet, duplicate the Call log, or
   // strip the `net::ERR_` / `Target crashed` / closed-target wording
-  // from the headline.
+  // from the headline. Issue #46 closes the Display Error parity epic by
+  // pinning catalog ID 45 (`test.fail()` unexpectedly passed). That
+  // catalog row was never in the allowlist because its parity has held
+  // since issue #33 added the Display Error Formatter — the
+  // status-derived branch in `formatDisplayErrors` emits the literal
+  // `Expected to fail, but passed.` string whenever
+  // `result.status === 'passed' && test.expectedStatus === 'failed'`,
+  // matching Playwright's `formatResultFailure` text exactly. Contract
+  // regression tests in tests/contract/display-error-formatter.spec.ts
+  // pin the exact wording, the absence of a codeframe (status-derived
+  // shapes carry no `error.location`), the absence of ANSI escape codes
+  // (Playwright wraps the headline in `colors.red(...)` but the bundled
+  // `colors/safe` package respects FORCE_COLOR=0 in the parity harness),
+  // and the status-derived-precedes-TestError ordering, so a future
+  // formatter change cannot localize the wording, drop the period or
+  // comma, invent a codeframe, or reorder status-derived entries behind
+  // TestErrors.
 ]);
 
 test.describe('Error Catalog — Display Error parity', () => {

@@ -1788,4 +1788,90 @@ test.describe('Display Error Formatter — public boundary', () => {
     // Headline appears exactly once.
     expect(error.message.split(headline).length - 1).toBe(1);
   });
+
+  test('test.fail unexpectedly passed produces a status-derived Display Error with the exact "Expected to fail, but passed." message and no codeframe (catalog #45)', () => {
+    // Catalog #45 parity: a test marked `test.fail()` whose body actually
+    // passes triggers Playwright's status-derived branch in
+    // `formatResultFailure` (`packages/playwright/src/reporters/base.ts`):
+    // `result.status === 'passed' && test.expectedStatus === 'failed'`. The
+    // HTML reporter writes the literal `Expected to fail, but passed.`
+    // string for that branch — Playwright wraps the text in
+    // `colors.red(...)` from the bundled `colors/safe` npm package, but
+    // that package respects the `FORCE_COLOR=0` env the parity harness
+    // sets, so both reporters write plain text under the catalog gate.
+    // The formatter must emit the exact wording with no codeframe (status-
+    // derived shapes carry no `error.location`) and no smuggled extra
+    // fields, otherwise an AFK agent would see catalog #45 regress.
+    const run = fakeRun({
+      rootDir: '/repo',
+      files: [
+        {
+          fileName: '/repo/tests/test-fail.spec.ts',
+          tests: [
+            {
+              title: 'test.fail() but the body actually passes',
+              status: 'passed',
+              expectedStatus: 'failed',
+              results: [{ status: 'passed' }],
+            },
+          ],
+        },
+      ],
+    });
+    const { test: t, result } = pickTestAndResult(run);
+
+    const errors = formatDisplayErrors(t, result);
+
+    expect(errors).toEqual([{ message: 'Expected to fail, but passed.' }]);
+    const [error] = errors;
+    if (!error) throw new Error('expected status-derived Display Error for catalog #45');
+    // No ANSI escape codes — the HTML reporter wraps the headline in
+    // `colors.red(...)`, but the bundled `colors/safe` package respects
+    // FORCE_COLOR=0 and emits plain text. The Runboard formatter must
+    // never invent ANSI wrappers for status-derived shapes.
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI sequences include control chars
+    expect(error.message).not.toMatch(/\[/);
+    // Status-derived shapes have no `error.location`, so no codeframe is
+    // generated. Inventing a codeframe would diverge from the HTML
+    // reporter, which only renders codeframes for TestError entries.
+    expect(error.codeframe).toBeUndefined();
+  });
+
+  test('status-derived "Expected to fail, but passed." precedes TestError entries when both apply (catalog #45)', () => {
+    // Defensive ordering check for catalog #45: Playwright's
+    // `formatResultFailure` emits the status-derived entry first, then
+    // iterates `result.errors[]`. The Runboard formatter must preserve
+    // that ordering so a future shape — e.g. an `afterEach` failure that
+    // fires after a `test.fail()` body has already passed — stays
+    // index-aligned with the HTML reporter and with the
+    // index-aligned `result.runboard.evidence[]` array.
+    const run = fakeRun({
+      rootDir: '/repo',
+      files: [
+        {
+          fileName: '/repo/tests/test-fail-mixed.spec.ts',
+          tests: [
+            {
+              title: 'test.fail body passes but a teardown error also fires',
+              status: 'passed',
+              expectedStatus: 'failed',
+              results: [
+                {
+                  status: 'passed',
+                  errors: [{ message: 'teardown failure' }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    const { test: t, result } = pickTestAndResult(run);
+
+    const errors = formatDisplayErrors(t, result);
+
+    expect(errors).toHaveLength(2);
+    expect(errors[0]?.message).toBe('Expected to fail, but passed.');
+    expect(errors[1]?.message).toContain('teardown failure');
+  });
 });
