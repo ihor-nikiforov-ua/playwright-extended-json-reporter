@@ -21,7 +21,10 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "docs/public",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

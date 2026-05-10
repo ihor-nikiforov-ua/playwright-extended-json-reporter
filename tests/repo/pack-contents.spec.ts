@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { readFile, stat } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -51,6 +52,72 @@ test.describe('Published package contents', () => {
     expect(paths).toContain('dist/runboard-reporter.d.ts');
   });
 
+  test('publishes the MIT LICENSE trust signal alongside package metadata', async () => {
+    const paths = packed.files.map((f) => f.path);
+    expect(paths).toContain('LICENSE');
+    const licenseText = await readFile(resolve(repoRoot, 'LICENSE'), 'utf8');
+    expect(licenseText).toMatch(/MIT License/);
+    const pkg = JSON.parse(await readFile(resolve(repoRoot, 'package.json'), 'utf8'));
+    expect(pkg.license).toBe('MIT');
+  });
+
+  test('publishes the manually maintained CHANGELOG.md trust signal', async () => {
+    const paths = packed.files.map((f) => f.path);
+    expect(paths).toContain('CHANGELOG.md');
+    const changelog = await readFile(resolve(repoRoot, 'CHANGELOG.md'), 'utf8');
+    // Public Preview Release structure: a top-level Changelog heading and a
+    // forward-looking [Unreleased] section that release PRs can rename to
+    // a versioned entry.
+    expect(changelog).toMatch(/^# Changelog/m);
+    expect(changelog).toMatch(/## \[Unreleased\]/);
+  });
+
+  test('keeps repository governance docs in the repo but out of the tarball', async () => {
+    for (const repoOnlyDoc of ['CONTRIBUTING.md', 'SECURITY.md']) {
+      const repoStat = await stat(resolve(repoRoot, repoOnlyDoc));
+      expect(repoStat.isFile(), `${repoOnlyDoc} must exist in the repository`).toBe(true);
+    }
+    const paths = new Set(packed.files.map((f) => f.path));
+    for (const repoOnlyDoc of ['CONTRIBUTING.md', 'SECURITY.md']) {
+      expect(
+        paths.has(repoOnlyDoc),
+        `Published tarball must not include repository governance doc ${repoOnlyDoc}`,
+      ).toBe(false);
+    }
+  });
+
+  test('does not publish maintainer docs (PRDs, ADRs, agents, error catalog)', () => {
+    const internalDocPatterns: ReadonlyArray<{ label: string; pattern: RegExp }> = [
+      { label: 'PRD docs', pattern: /^docs\/prd\// },
+      { label: 'ADR docs', pattern: /^docs\/adr\// },
+      { label: 'agent docs', pattern: /^docs\/agents\// },
+      { label: 'error catalog docs', pattern: /^docs\/error-catalog\// },
+    ];
+    for (const { label, pattern } of internalDocPatterns) {
+      const offending = packed.files.filter((f) => pattern.test(f.path)).map((f) => f.path);
+      expect(
+        offending,
+        `Published tarball must not include ${label}; found: ${offending.join(', ')}`,
+      ).toEqual([]);
+    }
+  });
+
+  test('does not publish repository scripts or generated test output', () => {
+    const repoOnlyPatterns: ReadonlyArray<{ label: string; pattern: RegExp }> = [
+      { label: 'scripts directory', pattern: /^scripts\// },
+      { label: 'Playwright report output', pattern: /^playwright-report\// },
+      { label: 'Playwright test results', pattern: /^test-results\// },
+      { label: 'Runboard Data Bundle output', pattern: /^playwright-runboard-report\// },
+    ];
+    for (const { label, pattern } of repoOnlyPatterns) {
+      const offending = packed.files.filter((f) => pattern.test(f.path)).map((f) => f.path);
+      expect(
+        offending,
+        `Published tarball must not include ${label}; found: ${offending.join(', ')}`,
+      ).toEqual([]);
+    }
+  });
+
   test('does not publish any Reporter Fixture Suite files', () => {
     const internalPathPatterns: ReadonlyArray<{ label: string; pattern: RegExp }> = [
       { label: 'tests/ directory', pattern: /^tests\// },
@@ -92,7 +159,20 @@ test.describe('Published package contents', () => {
   });
 
   test('publishes only the documented files allowlist roots', () => {
-    const allowedRoots = ['dist/', 'README.md', 'package.json'];
+    // Public Pack Boundary: the published tarball must contain only the built
+    // runtime, README, package metadata, public consumer docs, and Package
+    // Trust Signals (LICENSE and CHANGELOG.md). Everything else — PRDs, ADRs,
+    // agent/error-catalog docs, tests, fixtures, scripts, generated output,
+    // repository governance docs, and repository configuration — stays in the
+    // repository.
+    const allowedRoots = [
+      'dist/',
+      'docs/public/',
+      'README.md',
+      'package.json',
+      'LICENSE',
+      'CHANGELOG.md',
+    ];
     const offending = packed.files
       .map((f) => f.path)
       .filter((path) => !allowedRoots.some((root) => path === root || path.startsWith(root)));
