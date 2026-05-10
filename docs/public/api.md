@@ -11,8 +11,8 @@ explains the intent and grouping.
 
 ## Exports
 
-- `RunboardReporter` — the Playwright reporter class. Also exported as the
-  default export so it can be referenced as `'playwright-runboard-reporter'`
+- `RunboardReporter` — the Playwright reporter class. Also re-exported as
+  `default` so it can be referenced as `'playwright-runboard-reporter'`
   directly in `playwright.config.ts`.
 - `RunboardReporterOptions` — the option object accepted by the reporter
   constructor and by Playwright's `reporter:` array.
@@ -29,7 +29,7 @@ explains the intent and grouping.
   `RunboardTestErrorEvidence`, `RunboardStatusDerivedErrorEvidence`, and
   `RunboardSourceExcerpt`.
 
-The Runboard Contract Types use a `Runboard` prefix even when they mirror
+The Runboard Contract Types use a Runboard prefix even when they mirror
 Playwright HTML Report Data so they are clearly distinguishable from
 Playwright's runtime reporter API objects and private HTML reporter data
 types.

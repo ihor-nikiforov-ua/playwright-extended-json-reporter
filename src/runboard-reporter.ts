@@ -65,6 +65,35 @@ interface MergeReportEndParams {
   result: { startTime: Date; duration: number };
 }
 
+/**
+ * Playwright reporter that emits a Runboard Data Bundle for the current
+ * test run.
+ *
+ * Output defaults to `playwright-runboard-report/` and contains a
+ * Playwright HTML Report Data shape without rendered HTML: `report.json`
+ * for the Report Summary, one `<fileId>.json` per Test File Entry, and
+ * copied Attachment Assets under `data/`. The bundle is intended for
+ * ingestion by the Runboard or by any consumer that reads the documented
+ * Runboard Data Contract.
+ *
+ * Wire it into Playwright through the `reporter:` array, either by package
+ * name or by named import:
+ *
+ * ```ts
+ * import { defineConfig } from '@playwright/test';
+ *
+ * export default defineConfig({
+ *   reporter: [
+ *     ['list'],
+ *     ['playwright-runboard-reporter', { outputFolder: 'playwright-runboard-report' }],
+ *   ],
+ * });
+ * ```
+ *
+ * Rendering, serving, or opening HTML, Previous Run storage, and reporter-
+ * side Error Classification are intentionally out of scope; see the
+ * Public Documentation Set under `docs/public/` for the full boundary list.
+ */
 export class RunboardReporter implements Reporter {
   private readonly outputFolder: string;
   private readonly attachmentsBaseURL: string;

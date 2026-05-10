@@ -10,15 +10,60 @@ export const NO_OP_COMPATIBILITY_OPTIONS = ['open', 'host', 'port', 'doNotInline
 
 export type NoOpCompatibilityOptionName = (typeof NO_OP_COMPATIBILITY_OPTIONS)[number];
 
+/**
+ * Options accepted by the {@link RunboardReporter} constructor and by
+ * Playwright's `reporter:` array.
+ *
+ * Option names that also apply to Playwright's official HTML reporter use
+ * the same name and default. Options that only make sense for a rendered
+ * HTML report (`open`, `host`, `port`, `doNotInlineAssets`) are accepted
+ * for configuration compatibility and ignored at runtime with a once-per-
+ * option warning during `onBegin`.
+ *
+ * Environment-variable overrides and precedence are documented in
+ * `docs/public/options.md`.
+ */
 export interface RunboardReporterOptions {
+  /**
+   * Output Folder for the Runboard Data Bundle. Resolved to an absolute
+   * path before cleanup. Defaults to `'playwright-runboard-report'` and
+   * may also be set via `PLAYWRIGHT_RUNBOARD_OUTPUT_DIR`.
+   */
   outputFolder?: string;
+  /**
+   * Base path used in copied Attachment Asset references. Defaults to
+   * `'data/'` and may also be set via
+   * `PLAYWRIGHT_RUNBOARD_ATTACHMENTS_BASE_URL`.
+   */
   attachmentsBaseURL?: string;
+  /** Human-readable report title preserved in `report.options.title`. */
   title?: string;
+  /** When `true`, Runboard UIs hide the AI copy-prompt affordance. */
   noCopyPrompt?: boolean;
+  /**
+   * When `true`, suppresses Source Excerpts in Structured Error Evidence,
+   * matching Playwright's `noSnippets` privacy and size control.
+   */
   noSnippets?: boolean;
+  /**
+   * Accepted for compatibility with Playwright's HTML reporter and ignored
+   * at runtime; this package does not render, serve, or open HTML.
+   */
   open?: 'always' | 'never' | 'on-failure';
+  /**
+   * Accepted for compatibility with Playwright's HTML reporter and ignored
+   * at runtime; this package does not serve HTML.
+   */
   host?: string;
+  /**
+   * Accepted for compatibility with Playwright's HTML reporter and ignored
+   * at runtime; this package does not serve HTML.
+   */
   port?: number;
+  /**
+   * Accepted for compatibility with Playwright's HTML reporter and ignored
+   * at runtime; this package does not render HTML or inline assets.
+   */
   doNotInlineAssets?: boolean;
 }
 
