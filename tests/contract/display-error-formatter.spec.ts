@@ -1137,4 +1137,215 @@ test.describe('Display Error Formatter — public boundary', () => {
       expect(error.message.split(matcherHintFragment).length - 1).toBe(1);
     }
   });
+
+  test('hook failure preserves headline, snippet, and stack tail (catalog #32–#35)', () => {
+    // Catalog rows 32 (beforeAll), 33 (beforeEach), 34 (afterEach), and 35
+    // (afterAll) share Playwright's worker-thrown hook shape: a single-line
+    // `Error: <message>` headline, a Babel-rendered codeframe stored in
+    // `error.snippet`, and a stack whose first frame is the hook source
+    // location. Display Error parity requires the formatter to emit
+    // `${headline}\n\n${snippet}\n${stack-tail}` — the same shape Playwright
+    // HTML reporter produces — and to derive the per-error `codeframe` field
+    // from the location's source file. Each hook variant differs only in the
+    // method name on the headline; they all flow through the same generic
+    // partition, so a single parametrized check pins the contract for all
+    // four rows.
+    interface HookCase {
+      catalogId: number;
+      hookName: 'beforeAll' | 'beforeEach' | 'afterEach' | 'afterAll';
+      sourceFile: string;
+    }
+    const hookCases: readonly HookCase[] = [
+      { catalogId: 32, hookName: 'beforeAll', sourceFile: '/repo/tests/before-all.spec.ts' },
+      { catalogId: 33, hookName: 'beforeEach', sourceFile: '/repo/tests/before-each.spec.ts' },
+      { catalogId: 34, hookName: 'afterEach', sourceFile: '/repo/tests/after-each.spec.ts' },
+      { catalogId: 35, hookName: 'afterAll', sourceFile: '/repo/tests/after-all.spec.ts' },
+    ];
+
+    for (const hookCase of hookCases) {
+      const headline = `Error: ${hookCase.hookName} boom`;
+      const snippet = [
+        `  1 | import { test } from '@playwright/test';`,
+        `> 2 | test.${hookCase.hookName}(() => { throw new Error('${hookCase.hookName} boom'); });`,
+        `    |                              ^`,
+        `  3 | test('placeholder so the failing hook surfaces in the bundle', () => {});`,
+        `  4 |`,
+      ].join('\n');
+      const frame = `    at ${hookCase.sourceFile}:2:30`;
+      const stack = `${headline}\n${frame}`;
+
+      const run = fakeRun({
+        rootDir: '/repo',
+        files: [
+          {
+            fileName: hookCase.sourceFile,
+            tests: [
+              {
+                title: 'placeholder so the failing hook surfaces in the bundle',
+                status: 'failed',
+                expectedStatus: 'passed',
+                results: [{ status: 'failed', errors: [{ message: headline, stack, snippet }] }],
+              },
+            ],
+          },
+        ],
+      });
+      const { test: t, result } = pickTestAndResult(run);
+
+      const [error] = formatDisplayErrors(t, result);
+      if (!error) throw new Error(`expected Display Error for catalog #${hookCase.catalogId}`);
+
+      expect(error.message, `catalog #${hookCase.catalogId}: missing headline`).toContain(headline);
+      expect(error.message, `catalog #${hookCase.catalogId}: missing snippet`).toContain(
+        `> 2 | test.${hookCase.hookName}(() => { throw new Error('${hookCase.hookName} boom'); });`,
+      );
+      expect(error.message, `catalog #${hookCase.catalogId}: missing stack frame`).toContain(frame);
+      // Headline appears exactly once — a regression that re-emitted the
+      // pre-frame portion of the stack would render `Error: <hook> boom`
+      // twice in the Display Error message.
+      expect(error.message.split(headline).length - 1).toBe(1);
+    }
+  });
+
+  test('fixture setup failure preserves headline, snippet, and fixture call site (catalog #36)', () => {
+    // Catalog #36 parity: a fixture's setup factory throws synchronously, so
+    // Playwright's worker reports the error with the fixture call site in the
+    // stack frame and the source line that built the fixture in the snippet.
+    // The headline is the underlying `Error: <message>` thrown by the test;
+    // there is no Call log because the failure is in worker setup code rather
+    // than an action against a Playwright object.
+    const headline = 'Error: fixture setup boom';
+    const snippet = [
+      `  1 | import { test as base } from '@playwright/test';`,
+      `  2 | const test = base.extend<{ broken: string }>({`,
+      `> 3 |   broken: async ({}, use) => { throw new Error('fixture setup boom'); await use('x'); },`,
+      `    |                                      ^`,
+      `  4 | });`,
+    ].join('\n');
+    const sourceFile = '/repo/tests/fixture-setup.spec.ts';
+    const frame = `    at Object.broken (${sourceFile}:3:38)`;
+    const stack = `${headline}\n${frame}`;
+
+    const run = fakeRun({
+      rootDir: '/repo',
+      files: [
+        {
+          fileName: sourceFile,
+          tests: [
+            {
+              title: 'fixture setup throws before the test body runs',
+              status: 'failed',
+              expectedStatus: 'passed',
+              results: [{ status: 'failed', errors: [{ message: headline, stack, snippet }] }],
+            },
+          ],
+        },
+      ],
+    });
+    const { test: t, result } = pickTestAndResult(run);
+
+    const [error] = formatDisplayErrors(t, result);
+    if (!error) throw new Error('expected Display Error for catalog #36');
+
+    expect(error.message).toContain(headline);
+    expect(error.message).toContain(
+      `> 3 |   broken: async ({}, use) => { throw new Error('fixture setup boom'); await use('x'); },`,
+    );
+    expect(error.message).toContain(frame);
+    expect(error.message.split(headline).length - 1).toBe(1);
+  });
+
+  test('fixture teardown timeout preserves ANSI-colored headline, snippet, and stack tail (catalog #37)', () => {
+    // Catalog #37 parity: a fixture whose teardown exceeds its dedicated
+    // `timeout` produces a single-line headline that Playwright wraps in red
+    // ANSI escapes before serializing. The headline is the only place the
+    // `Fixture "<name>" timeout of Nms exceeded during teardown.` wording
+    // appears, so the formatter must keep the ANSI escapes intact in
+    // `result.errors[].message` (the parity comparator strips ANSI when
+    // building the codeframe message column, but the human-facing message is
+    // pre-rendered by Playwright with the colors embedded). The fixture
+    // declaration source line lands in the snippet, and the teardown call
+    // site appears in the stack frame.
+    const ansiHeadline =
+      '[31mFixture "slowTeardown" timeout of 100ms exceeded during teardown.[39m';
+    const sourceFile = '/repo/tests/fixture-teardown.spec.ts';
+    const snippet = [
+      `  1 | import { test as base } from '@playwright/test';`,
+      `> 2 | const test = base.extend<{ slowTeardown: string }>({`,
+      `    |                   ^`,
+      `  3 |   slowTeardown: [async ({}, use) => {`,
+      `  4 |     await use('x');`,
+      `  5 |     await new Promise((r) => setTimeout(r, 5000));`,
+    ].join('\n');
+    const frame = `    at ${sourceFile}:2:19`;
+    const stack = `${ansiHeadline}\n${frame}`;
+
+    const run = fakeRun({
+      rootDir: '/repo',
+      files: [
+        {
+          fileName: sourceFile,
+          tests: [
+            {
+              title: 'fixture teardown exceeds its dedicated timeout',
+              status: 'failed',
+              expectedStatus: 'passed',
+              results: [{ status: 'failed', errors: [{ message: ansiHeadline, stack, snippet }] }],
+            },
+          ],
+        },
+      ],
+    });
+    const { test: t, result } = pickTestAndResult(run);
+
+    const [error] = formatDisplayErrors(t, result);
+    if (!error) throw new Error('expected Display Error for catalog #37');
+
+    expect(error.message).toContain(ansiHeadline);
+    expect(error.message).toContain(`> 2 | const test = base.extend<{ slowTeardown: string }>({`);
+    expect(error.message).toContain(frame);
+    // Headline appears exactly once — preserves the ANSI escapes verbatim and
+    // does not re-emit the pre-frame portion of the stack as stack tail.
+    expect(error.message.split(ansiHeadline).length - 1).toBe(1);
+  });
+
+  test('worker teardown produces a stackless Display Error with no codeframe (catalog #38)', () => {
+    // Catalog #38 parity: when a worker process exits unexpectedly mid-test,
+    // Playwright's dispatcher records the failure as a TestError with a
+    // single-line `Error: worker process exited unexpectedly (...)` message
+    // and no stack — there is no JavaScript stack frame to capture because
+    // the death came from outside JavaScript (a `process.exit(...)` from
+    // user code, a SIGKILL, a native crash, …). The Display Error therefore
+    // contains the headline only: no snippet, no stack tail, no codeframe
+    // (the `codeframe` field requires `error.location`, which Playwright
+    // does not attach to runner-level worker failures). A regression that
+    // synthesized a fake stack frame, a `<missing>` snippet, or attached a
+    // codeframe from the test's source location would diverge from
+    // Playwright's HTML reporter for this row.
+    const headline = 'Error: worker process exited unexpectedly (code=7, signal=null)';
+    const sourceFile = '/repo/tests/worker-teardown.spec.ts';
+    const run = fakeRun({
+      rootDir: '/repo',
+      files: [
+        {
+          fileName: sourceFile,
+          tests: [
+            {
+              title: 'the worker process exits mid-test',
+              status: 'failed',
+              expectedStatus: 'passed',
+              results: [{ status: 'failed', errors: [{ message: headline }] }],
+            },
+          ],
+        },
+      ],
+    });
+    const { test: t, result } = pickTestAndResult(run);
+
+    const [error] = formatDisplayErrors(t, result);
+    if (!error) throw new Error('expected Display Error for catalog #38');
+
+    expect(error.message).toBe(headline);
+    expect(error.codeframe).toBeUndefined();
+  });
 });

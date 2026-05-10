@@ -104,7 +104,22 @@ const EXPECTED_PARITY_FAILURES: ReadonlySet<number> = new Set<number>([
   // formatter changes were needed; a contract regression test in
   // tests/contract/display-error-formatter.spec.ts pins the shape so a future
   // change cannot drop the matcher hint, snippet caret, or stack frame.
-  32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44,
+  // Issue #43 dropped catalog IDs 32, 33, 34, 35, 36, 37, 38 (beforeAll,
+  // beforeEach, afterEach, afterAll, fixture setup, fixture teardown
+  // timeout, worker teardown / unexpected exit). Hook and fixture-setup
+  // failures arrive as a single-line `Error: <message>` headline plus a
+  // Babel-rendered `error.snippet` and a stack whose first frame is the
+  // hook or fixture call site; fixture teardown timeouts arrive as an
+  // ANSI-wrapped `Fixture "<name>" timeout of Nms exceeded during
+  // teardown.` headline plus snippet and stack tail; worker
+  // teardown/unexpected-exit failures arrive as a stackless single-line
+  // headline. All five shapes round-trip through the same generic
+  // headline + snippet + stack-tail formatter the matcher families already
+  // use, so no formatter changes were needed; a contract regression test
+  // in tests/contract/display-error-formatter.spec.ts pins each shape so a
+  // future change cannot drop the snippet, duplicate the headline, strip
+  // ANSI, or synthesize a fake codeframe for the stackless worker case.
+  39, 40, 41, 42, 43, 44,
 ]);
 
 test.describe('Error Catalog — Display Error parity', () => {
