@@ -3,6 +3,7 @@ dist/
 coverage/
 playwright-report/
 playwright-runboard-report/
+!docs/public/examples/playwright-runboard-report/
 test-results/
 .runboard-int-*/
 .runboard-compat-*/

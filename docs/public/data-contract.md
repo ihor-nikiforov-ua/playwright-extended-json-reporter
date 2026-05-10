@@ -34,6 +34,10 @@ The exact filename `<fileId>` matches Playwright HTML reporter file IDs: the
 first 20 characters of the SHA-1 of the POSIX-normalized source file name
 relative to Playwright's `config.rootDir`.
 
+A real Runboard Data Bundle is checked into the package under
+[`examples/`](./examples/README.md). It is regenerated and validated by
+tests so the sample JSON cannot silently rot.
+
 ## Report Summary
 
 `report.json` contains the lightweight Playwright HTML Report Data summary
