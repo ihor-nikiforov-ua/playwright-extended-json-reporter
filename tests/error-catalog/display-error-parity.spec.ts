@@ -328,11 +328,15 @@ test.describe('Error Catalog — Display Error parity coverage', () => {
     expect(enforced.length + allowlisted.length).toBe(ids.length);
   });
 
-  test('release-gate readiness: an empty allowlist means every fixture is enforced', () => {
-    // The Display Error parity epic (#31) finishes when this expectation no
-    // longer needs to be skipped: every catalog row has parity, the
-    // EXPECTED_PARITY_FAILURES set is empty, and the release gate (#47) is
-    // safe to flip on.
-    expect(typeof EXPECTED_PARITY_FAILURES.size).toBe('number');
+  test('release-gate readiness: every fixture is enforced (allowlist is empty)', () => {
+    // Issue #47 closes the Display Error parity epic (#31): every catalog row
+    // has parity, the EXPECTED_PARITY_FAILURES set is empty, and the release
+    // gate (`npm run release-gate`) is required to fail when any catalog ID
+    // loses Display Error parity. Re-introducing an allowlist entry would let
+    // a regression ride through the gate, so the catalog suite refuses it.
+    expect(
+      [...EXPECTED_PARITY_FAILURES],
+      'EXPECTED_PARITY_FAILURES must stay empty so the release gate enforces parity for every Error Type',
+    ).toEqual([]);
   });
 });

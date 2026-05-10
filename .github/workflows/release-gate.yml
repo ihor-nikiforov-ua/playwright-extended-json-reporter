@@ -1,0 +1,52 @@
+name: Release Gate
+
+# The Display Error parity epic (#31) finishes when every Error Type in the
+# Error Catalog passes the Display Error parity comparator. The canonical
+# `verify` gate keeps PR feedback fast by running the locked-version smoke
+# tests, contract tests (including Source Excerpt 1.1.0 coverage), repo
+# invariants, lint, typecheck, and pack verification. The release gate adds
+# the heavier all-45 Error Catalog Display Error parity suite so a published
+# GitHub release fails when any catalog ID loses parity.
+#
+# Triggers:
+#
+# - `release.published` blocks a published GitHub release on parity failure.
+# - `workflow_dispatch` lets maintainers run the gate on demand without
+#   cutting a release.
+#
+# Normal CI (`ci.yml`) and the scheduled Error Catalog workflow
+# (`error-catalog.yml`) remain in place; this workflow exists specifically to
+# anchor the parity gate to release events.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release-gate:
+    name: Release Gate (verify + all-45 Display Error parity)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run release gate
+        run: npm run release-gate

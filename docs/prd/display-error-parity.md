@@ -32,6 +32,12 @@ A release-grade Runboard Reporter must prove Display Error parity across every E
 - The normal release gate or a required release workflow prevents publishing without all-45 Display Error parity.
 - Source Excerpt schema `1.1.0` behavior is covered by contract tests, compatibility tests where applicable, and documentation.
 
+## Release Gate
+
+The release gate is `npm run release-gate`. It chains the canonical `npm run verify` PR-time gate (which already runs the Source Excerpt schema `1.1.0` contract coverage in `tests/contract/error-evidence.spec.ts`) with the heavier `npm run test:catalog` Error Catalog Suite. The catalog suite parametrizes `tests/error-catalog/display-error-parity.spec.ts` over every catalog row and refuses any `EXPECTED_PARITY_FAILURES` allowlist entry, so a regression on any of the 45 Error Types fails the gate with a `formatCatalogDisplayErrorDifferences` report that names the catalog ID, Error Type, test file, result index, and error index for every divergent field.
+
+The dedicated `Release Gate` GitHub workflow (`.github/workflows/release-gate.yml`) runs the same `npm run release-gate` script on `release.published` and `workflow_dispatch`. Normal CI (`ci.yml`) keeps PR feedback fast by running only `npm run verify`; the scheduled Error Catalog workflow (`error-catalog.yml`) keeps a weekly cadence so parity regressions surface between releases.
+
 ## Out of Scope
 
 - Rendering the Runboard UI.
