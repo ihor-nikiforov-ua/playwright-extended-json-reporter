@@ -884,4 +884,98 @@ test.describe('Display Error Formatter — public boundary', () => {
     const headlineOccurrences = error.message.split('Execution context was destroyed').length - 1;
     expect(headlineOccurrences).toBe(1);
   });
+
+  test('soft assertions produce one Display Error per accumulated TestError, in order, with matcher-specific text preserved (catalog #27)', () => {
+    // Catalog #27 parity: `expect.soft(...)` does not throw, so Playwright
+    // accumulates each failed soft matcher as a separate `TestError` on
+    // `result.errors[]`. The formatter must emit one Display Error per
+    // TestError, in the same order Playwright recorded them, and must not
+    // collapse them into a single generic message — matcher-specific text
+    // (`toHaveText`, `toHaveCount`) is the distinguishing signal Runboard uses
+    // to tell which soft assertion failed.
+    const toHaveTextMessage = [
+      'Error: expect(locator).toHaveText(expected) failed',
+      '',
+      "Locator:  locator('h1')",
+      'Expected: "A"',
+      'Received: "B"',
+      'Timeout:  100ms',
+      '',
+      'Call log:',
+      '  - Expect "toHaveText" with timeout 100ms',
+      "  - waiting for locator('h1')",
+      '',
+    ].join('\n');
+    const toHaveCountMessage = [
+      'Error: expect(locator).toHaveCount(expected) failed',
+      '',
+      "Locator:  locator('li')",
+      'Expected: 2',
+      'Received: 1',
+      'Timeout:  100ms',
+      '',
+      'Call log:',
+      '  - Expect "toHaveCount" with timeout 100ms',
+      "  - waiting for locator('li')",
+      '',
+    ].join('\n');
+    const run = fakeRun({
+      rootDir: '/repo',
+      files: [
+        {
+          fileName: '/repo/tests/soft.spec.ts',
+          tests: [
+            {
+              title: 'soft assertions accumulate multiple errors per result',
+              status: 'failed',
+              expectedStatus: 'passed',
+              results: [
+                {
+                  status: 'failed',
+                  errors: [
+                    {
+                      message: toHaveTextMessage,
+                      stack: `${toHaveTextMessage}\n    at /repo/tests/soft.spec.ts:3:48`,
+                    },
+                    {
+                      message: toHaveCountMessage,
+                      stack: `${toHaveCountMessage}\n    at /repo/tests/soft.spec.ts:4:48`,
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    const { test: t, result } = pickTestAndResult(run);
+
+    const errors = formatDisplayErrors(t, result);
+
+    // Two Display Errors, one per soft assertion failure — never collapsed.
+    expect(errors).toHaveLength(2);
+    const [first, second] = errors;
+    if (!first || !second) throw new Error('expected two Display Errors');
+
+    // Order must match the input `result.errors[]` — Playwright records the
+    // toHaveText failure before the toHaveCount failure in the fixture spec.
+    expect(first.message).toContain('toHaveText');
+    expect(first.message).toContain("Locator:  locator('h1')");
+    expect(first.message).toContain('Expected: "A"');
+    expect(first.message).toContain('Received: "B"');
+    expect(first.message).toContain('    at /repo/tests/soft.spec.ts:3:48');
+
+    expect(second.message).toContain('toHaveCount');
+    expect(second.message).toContain("Locator:  locator('li')");
+    expect(second.message).toContain('Expected: 2');
+    expect(second.message).toContain('Received: 1');
+    expect(second.message).toContain('    at /repo/tests/soft.spec.ts:4:48');
+
+    // The matcher names are mutually exclusive between the two Display Errors:
+    // a regression that merged or duplicated the entries would surface as a
+    // matcher-name appearing in the wrong slot.
+    expect(first.message).not.toContain('toHaveCount');
+    expect(second.message).not.toContain('toHaveText');
+  });
 });

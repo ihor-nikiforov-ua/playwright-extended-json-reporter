@@ -84,8 +84,15 @@ const EXPECTED_PARITY_FAILURES: ReadonlySet<number> = new Set<number>([
   // a Call log. The same `parseErrorStack` partition keeps the multi-line
   // matcher block intact in `result.errors[].message`, while the
   // expected/actual/diff PNGs continue to ride through the existing
-  // data-bundle attachment model alongside the Display Error.
-  27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44,
+  // data-bundle attachment model alongside the Display Error. Issue #41
+  // dropped catalog ID 27 (Soft assertion failure); `expect.soft(...)` does
+  // not throw, so Playwright accumulates one TestError per failed soft
+  // matcher on `result.errors[]`. The Display Error Formatter already emits
+  // one Display Error per TestError in the order Playwright recorded them,
+  // and the serializer keeps `result.runboard.evidence[]` index-aligned with
+  // the Display Errors, so each individual soft web-first matcher reaches
+  // parity through the same partition the single-matcher catalog rows use.
+  28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44,
 ]);
 
 test.describe('Error Catalog — Display Error parity', () => {
