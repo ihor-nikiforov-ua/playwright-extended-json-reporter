@@ -258,6 +258,7 @@ _Avoid_: Full HTML reporter feature parity, report-serving parity, UI parity
 - The in-repo PRD is canonical for the Runboard Reporter data-contract plan; GitHub Issues are canonical for implementation tracking and may link or mirror planning content.
 - Broad quality milestones may be tracked as epics, but each **Implementation Issue** should be one-session sized and independently verifiable.
 - The canonical Display Error parity milestone lives at `docs/prd/display-error-parity.md`.
+- The Error Catalog Display Error parity comparator lives at `tests/harness/compatibility-fixture.ts` (`compareCatalogDisplayErrors` and `formatCatalogDisplayErrorDifferences`); the parametrized parity suite at `tests/error-catalog/display-error-parity.spec.ts` runs catalog fixtures through both reporters and tracks not-yet-at-parity rows with an `EXPECTED_PARITY_FAILURES` allowlist that follow-up Display Error implementation issues drain.
 
 ## Example dialogue
 
