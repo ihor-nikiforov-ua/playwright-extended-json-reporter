@@ -78,8 +78,14 @@ const EXPECTED_PARITY_FAILURES: ReadonlySet<number> = new Set<number>([
   // web-first failure shape produced by `formatMatcherMessage` in
   // playwright-core, so the same partition keeps their matcher hint + Locator
   // + Expected/Received + Timeout + Call log block intact in
-  // `result.errors[].message`.
-  26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44,
+  // `result.errors[].message`. Issue #40 dropped catalog ID 26
+  // (toHaveScreenshot); the screenshot matcher emits a `formatMatcherMessage`
+  // header followed by the indented pixel-diff text, a `Snapshot:` line, and
+  // a Call log. The same `parseErrorStack` partition keeps the multi-line
+  // matcher block intact in `result.errors[].message`, while the
+  // expected/actual/diff PNGs continue to ride through the existing
+  // data-bundle attachment model alongside the Display Error.
+  27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44,
 ]);
 
 test.describe('Error Catalog — Display Error parity', () => {
