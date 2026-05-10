@@ -2,14 +2,44 @@ import type {
   FullConfig,
   FullProject,
   FullResult,
+  Location,
   Suite,
   TestCase,
+  TestError,
   TestResult,
+  TestStep,
 } from '@playwright/test/reporter';
 
-export interface FakeFileSpec {
-  fileName: string;
-  tests: FakeTestSpec[];
+export interface FakeAttachmentSpec {
+  name: string;
+  contentType: string;
+  path?: string;
+  body?: Buffer;
+}
+
+export interface FakeStepSpec {
+  title: string;
+  startTime?: Date;
+  duration?: number;
+  category?: string;
+  location?: Location;
+  error?: TestError;
+  attachments?: FakeAttachmentSpec[];
+  steps?: FakeStepSpec[];
+  annotations?: Array<{ type: string; description?: string }>;
+}
+
+export interface FakeTestResultSpec {
+  retry?: number;
+  status?: TestResult['status'];
+  startTime?: Date;
+  duration?: number;
+  workerIndex?: number;
+  parallelIndex?: number;
+  errors?: TestError[];
+  attachments?: FakeAttachmentSpec[];
+  steps?: FakeStepSpec[];
+  annotations?: Array<{ type: string; description?: string }>;
 }
 
 export interface FakeTestSpec {
@@ -17,6 +47,19 @@ export interface FakeTestSpec {
   status?: TestResult['status'];
   expectedStatus?: TestCase['expectedStatus'];
   outcome?: ReturnType<TestCase['outcome']>;
+  annotations?: Array<{ type: string; description?: string; location?: Location }>;
+  tags?: string[];
+  repeatEachIndex?: number;
+  retries?: number;
+  results?: FakeTestResultSpec[];
+  describes?: string[];
+  location?: Location;
+  id?: string;
+}
+
+export interface FakeFileSpec {
+  fileName: string;
+  tests: FakeTestSpec[];
 }
 
 export interface FakeProjectSpec {
@@ -82,13 +125,12 @@ export function fakeRun(spec: FakeRunSpec): FakeRun {
       primaryProjectSuite.suites.push(fileSuite);
 
       for (const [index, testSpec] of file.tests.entries()) {
-        const test = createTestCase(testSpec, fileSuite, file.fileName, index);
-        fileSuite.tests.push(test);
-        const [primaryResult] = test.results;
-        if (!primaryResult) {
-          throw new Error('createTestCase must seed the test with a primary result');
+        const leafSuite = appendDescribeSuites(fileSuite, testSpec.describes ?? [], primaryProject);
+        const test = createTestCase(testSpec, leafSuite, file.fileName, index);
+        leafSuite.tests.push(test);
+        for (const result of test.results) {
+          testResults.push({ test, result });
         }
-        testResults.push({ test, result: primaryResult });
       }
     }
   }
@@ -132,6 +174,20 @@ function createSuite(
   return suite;
 }
 
+function appendDescribeSuites(
+  fileSuite: MutableSuite,
+  describeTitles: readonly string[],
+  project: FullProject,
+): MutableSuite {
+  let parent = fileSuite;
+  for (const title of describeTitles) {
+    const describeSuite = createSuite(title, 'describe', parent, project, fileSuite.location);
+    parent.suites.push(describeSuite);
+    parent = describeSuite;
+  }
+  return parent;
+}
+
 function collectTests(suite: Suite): TestCase[] {
   const out: TestCase[] = [...suite.tests];
   for (const child of suite.suites) {
@@ -148,39 +204,74 @@ function createTestCase(
 ): TestCase {
   const status: TestResult['status'] = spec.status ?? 'passed';
   const expectedStatus = spec.expectedStatus ?? 'passed';
-  const outcome = spec.outcome ?? (status === expectedStatus ? 'expected' : 'unexpected');
-  const result: TestResult = {
-    annotations: [],
-    attachments: [],
-    duration: 1,
-    errors: [],
-    parallelIndex: 0,
-    retry: 0,
-    startTime: new Date(0),
-    status,
-    stderr: [],
-    stdout: [],
-    steps: [],
-    workerIndex: 0,
-  };
+  const outcome = spec.outcome ?? deriveOutcome(spec, status, expectedStatus);
+
+  const resultSpecs = spec.results ?? [{ status }];
+  const results: TestResult[] = resultSpecs.map((rs, retry) => createResult(rs, retry));
 
   const test: TestCase = {
-    annotations: [],
+    annotations: (spec.annotations ?? []).map((a) => ({ ...a })),
     expectedStatus,
-    id: `${fileName}#${index}`,
-    location: { file: fileName, line: 1, column: 1 },
+    id: spec.id ?? `${fileName}#${index}`,
+    location: spec.location ?? { file: fileName, line: 1, column: 1 },
     parent,
-    repeatEachIndex: 0,
-    results: [result],
-    retries: 0,
-    tags: [],
+    repeatEachIndex: spec.repeatEachIndex ?? 0,
+    results,
+    retries: spec.retries ?? Math.max(results.length - 1, 0),
+    tags: spec.tags ?? [],
     timeout: 30_000,
     title: spec.title,
     type: 'test',
-    ok: () => outcome === 'expected' || outcome === 'flaky',
+    ok: () => outcome === 'expected' || outcome === 'flaky' || outcome === 'skipped',
     outcome: () => outcome,
     titlePath: () => [...parent.titlePath(), spec.title],
   };
 
   return test;
+}
+
+function deriveOutcome(
+  spec: FakeTestSpec,
+  status: TestResult['status'],
+  expectedStatus: TestCase['expectedStatus'],
+): ReturnType<TestCase['outcome']> {
+  if (spec.results && spec.results.length > 1) {
+    const final = spec.results[spec.results.length - 1]?.status ?? status;
+    if (final === expectedStatus) return 'flaky';
+    return 'unexpected';
+  }
+  if (status === 'skipped' && expectedStatus === 'skipped') return 'skipped';
+  return status === expectedStatus ? 'expected' : 'unexpected';
+}
+
+function createResult(spec: FakeTestResultSpec, retry: number): TestResult {
+  return {
+    annotations: (spec.annotations ?? []).map((a) => ({ ...a })),
+    attachments: (spec.attachments ?? []) as TestResult['attachments'],
+    duration: spec.duration ?? 1,
+    errors: (spec.errors ?? []).map((e) => ({ ...e })),
+    parallelIndex: spec.parallelIndex ?? 0,
+    retry: spec.retry ?? retry,
+    startTime: spec.startTime ?? new Date(0),
+    status: spec.status ?? 'passed',
+    stderr: [],
+    stdout: [],
+    steps: (spec.steps ?? []).map((s) => createStep(s)),
+    workerIndex: spec.workerIndex ?? 0,
+  };
+}
+
+function createStep(spec: FakeStepSpec): TestStep {
+  return {
+    title: spec.title,
+    startTime: spec.startTime ?? new Date(0),
+    duration: spec.duration ?? 0,
+    category: spec.category ?? 'test.step',
+    steps: (spec.steps ?? []).map((s) => createStep(s)),
+    attachments: spec.attachments ?? [],
+    annotations: (spec.annotations ?? []).map((a) => ({ ...a })),
+    titlePath: () => [spec.title],
+    ...(spec.location !== undefined ? { location: spec.location } : {}),
+    ...(spec.error !== undefined ? { error: { ...spec.error } } : {}),
+  } as unknown as TestStep;
 }
