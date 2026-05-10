@@ -27,3 +27,17 @@ semantics independently of the package version.
   PRDs, ADRs, agent and error-catalog docs, tests, fixtures, scripts,
   generated output, repository governance docs (`CONTRIBUTING.md`,
   `SECURITY.md`), and repository configuration remain repository-only.
+- Consumer-style TypeScript Declaration Compatibility gate at
+  `tests/repo/declaration-compatibility.spec.ts`: packs the built package,
+  installs it into a fresh consumer fixture, and runs `tsc --noEmit` over
+  every public export under documented TypeScript compiler versions. The
+  initial covered version is TypeScript `6.0.3`; `docs/public/support-matrix.md`
+  is now the canonical list.
+
+### Changed
+
+- Restored the public `onBegin(config, suite)` overload on `RunboardReporter`
+  so the published `dist/runboard-reporter.d.ts` is structurally assignable
+  to Playwright's `Reporter.onBegin?(config, suite)` signature. The v2
+  `onBegin(suite)` overload remains the preferred call path; both surface
+  in editor hovers.
