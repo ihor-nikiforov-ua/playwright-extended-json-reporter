@@ -193,22 +193,6 @@ test.describe('docs/public/ documentation spine', () => {
     });
   }
 
-  test('Support Matrix describes declaration compatibility as planned policy, not an existing gate', async () => {
-    const content = await readFile(resolve(repoRoot, 'docs/public/support-matrix.md'), 'utf8');
-    const tsHeader = '## TypeScript declaration compatibility';
-    const tsIndex = content.indexOf(tsHeader);
-    expect(tsIndex, 'support-matrix.md must contain the TypeScript section').toBeGreaterThan(-1);
-    const tsSection = content.slice(tsIndex);
-    expect(
-      tsSection,
-      'TypeScript section must NOT claim a declaration compatibility gate currently exists',
-    ).not.toMatch(/\bgate\b[^.]*\bconsumes\b/i);
-    expect(
-      tsSection,
-      'TypeScript section must mark declaration compatibility as planned/policy until the gate exists',
-    ).toMatch(/\b(?:planned|policy|future|not yet|will)\b/i);
-  });
-
   test('Contract Stability Matrix distinguishes the four documented surface categories', async () => {
     const content = await readFile(resolve(repoRoot, 'docs/public/data-contract.md'), 'utf8');
     const matrixIndex = content.indexOf('## Contract Stability Matrix');

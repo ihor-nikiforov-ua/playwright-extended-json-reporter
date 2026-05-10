@@ -48,20 +48,28 @@ versions are expected to consume the published declarations.
 
 - Declaration target: the generated declarations follow the package's
   `tsconfig.build.json` settings and ship under `dist/`.
-- Tested compiler versions: TypeScript **6.0.3**. The consumer-style
-  declaration compatibility gate at
-  [`tests/repo/declaration-compatibility.spec.ts`](../../tests/repo/declaration-compatibility.spec.ts)
-  packs the built package, installs it into a fresh consumer fixture,
-  installs the listed TypeScript compiler version(s), and runs
-  `tsc --noEmit` against a consumer source file that imports every public
-  export.
-- Verification: the gate runs as part of `npm run verify` through the
-  Playwright test suite invoked by `npm test`. Drift between this section
-  and the actual gate is rejected by docs-consistency tests in the same
-  spec.
+- Tested compiler versions:
+  - TypeScript `6.0.3`
+- Pinned consumer fixture dependencies:
+  - `@playwright/test` `1.59.1`
+  - `@types/node` `24.12.3`
 - Not supported: TypeScript compiler versions outside the tested list. The
   package does not publish TypeScript source, so consumers compile the
   declarations directly.
+
+The gate installs these pinned fixture dependencies into a throwaway
+consumer project so a new `@playwright/test` or `@types/node` release
+cannot silently change which Reporter or Node typings the gate exercises.
+
+The consumer-style declaration compatibility gate at
+[`tests/repo/declaration-compatibility.spec.ts`](../../tests/repo/declaration-compatibility.spec.ts)
+packs the built package, installs it into a fresh consumer fixture with
+the pinned dependencies above plus each tested TypeScript compiler
+version, and runs `tsc --noEmit` against a consumer source file that
+imports every public export. The gate runs as part of `npm run verify`
+through the Playwright test suite invoked by `npm test`. Drift between
+this section and the actual gate is rejected by docs-consistency tests in
+the same spec.
 
 There is no minimum supported TypeScript compiler version. The Support
 Matrix Policy refuses to claim a compiler range broader than the

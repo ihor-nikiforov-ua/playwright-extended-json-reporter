@@ -37,6 +37,19 @@ const supportMatrixPath = resolve(repoRoot, 'docs/public/support-matrix.md');
  */
 const DOCUMENTED_TYPESCRIPT_VERSIONS = ['6.0.3'] as const;
 
+/**
+ * Consumer-fixture peer dependency pins. The gate installs these exact
+ * versions into the throwaway consumer project so that a new
+ * `@playwright/test` or `@types/node` release cannot silently change which
+ * Reporter or Node typings the gate exercises. Update these constants and
+ * the matching block in `docs/public/support-matrix.md` together; the docs
+ * consistency tests below enforce that they agree.
+ */
+const DOCUMENTED_FIXTURE_DEPENDENCIES = {
+  '@playwright/test': '1.59.1',
+  '@types/node': '24.12.3',
+} as const;
+
 const CONSUMER_SOURCE = `
 import RunboardReporter, {
   RunboardReporter as NamedRunboardReporter,
@@ -167,8 +180,7 @@ async function runDeclarationCompatibility(
             'playwright-runboard-reporter': `file:${tarball}`,
           },
           devDependencies: {
-            '@playwright/test': '>=1.59 <2',
-            '@types/node': '*',
+            ...DOCUMENTED_FIXTURE_DEPENDENCIES,
             typescript: typescriptVersion,
           },
         },
@@ -204,6 +216,41 @@ async function runDeclarationCompatibility(
   }
 }
 
+/**
+ * Slice the TypeScript declaration compatibility section out of the
+ * support matrix markdown. Returns the section body up to the next H2
+ * heading or end-of-file. Throws via expect() if the section is missing.
+ */
+function extractTypeScriptSection(md: string): string {
+  const tsHeader = '## TypeScript declaration compatibility';
+  const startIdx = md.indexOf(tsHeader);
+  expect(startIdx, 'support-matrix.md must contain the TypeScript section').toBeGreaterThan(-1);
+  const after = md.slice(startIdx + tsHeader.length);
+  const nextH2 = after.search(/\n## /);
+  return nextH2 === -1 ? after : after.slice(0, nextH2);
+}
+
+/**
+ * Pull the indented sub-bullet block that follows a labeled top-level
+ * bullet (e.g. "- Tested compiler versions:"). Returns the text of the
+ * sub-bullet block so callers can parse individual lines from it.
+ */
+function extractSubBullets(section: string, labelPattern: RegExp): string {
+  const labelMatch = section.match(labelPattern);
+  expect(
+    labelMatch,
+    `TypeScript section must include a bullet matching ${labelPattern.source}`,
+  ).not.toBeNull();
+  const startIdx = (labelMatch?.index ?? 0) + (labelMatch?.[0].length ?? 0);
+  const tail = section.slice(startIdx);
+  const subListMatch = tail.match(/^((?:[ \t]{2,}-[^\n]*(?:\n|$))+)/m);
+  expect(
+    subListMatch,
+    `bullet matching ${labelPattern.source} must be followed by an indented sub-list`,
+  ).not.toBeNull();
+  return subListMatch?.[1] ?? '';
+}
+
 test.describe('Declaration compatibility — public docs commitment', () => {
   test('support-matrix.md documents the consumer-style declaration compatibility gate', async () => {
     const md = await readFile(supportMatrixPath, 'utf8');
@@ -217,14 +264,37 @@ test.describe('Declaration compatibility — public docs commitment', () => {
     ).toContain('tests/repo/declaration-compatibility.spec.ts');
   });
 
-  test('support-matrix.md names every TypeScript version covered by the gate', async () => {
+  test('support-matrix.md tested-compiler list exactly equals the gate matrix', async () => {
     const md = await readFile(supportMatrixPath, 'utf8');
-    for (const version of DOCUMENTED_TYPESCRIPT_VERSIONS) {
-      expect(
-        md,
-        `support-matrix.md must name TypeScript ${version} as a tested compiler version under the gate`,
-      ).toContain(version);
-    }
+    const section = extractTypeScriptSection(md);
+    const subList = extractSubBullets(section, /^- Tested compiler versions:[ \t]*$/m);
+    const documentedVersions = Array.from(
+      subList.matchAll(/^[ \t]{2,}- TypeScript `([^`]+)`[ \t]*$/gm),
+      (m) => m[1],
+    );
+    expect(
+      documentedVersions,
+      'support-matrix.md tested-compiler list must exactly match DOCUMENTED_TYPESCRIPT_VERSIONS — extra or missing versions break the public commitment',
+    ).toEqual([...DOCUMENTED_TYPESCRIPT_VERSIONS]);
+  });
+
+  test('support-matrix.md fixture pins exactly equal the consumer fixture pins', async () => {
+    const md = await readFile(supportMatrixPath, 'utf8');
+    const section = extractTypeScriptSection(md);
+    const subList = extractSubBullets(
+      section,
+      /^- Pinned consumer fixture dependencies[^\n]*:[ \t]*$/m,
+    );
+    const documentedPins = Object.fromEntries(
+      Array.from(
+        subList.matchAll(/^[ \t]{2,}- `([^`]+)` `([^`]+)`[ \t]*$/gm),
+        (m) => [m[1], m[2]] as const,
+      ),
+    );
+    expect(
+      documentedPins,
+      'support-matrix.md fixture pins must exactly match DOCUMENTED_FIXTURE_DEPENDENCIES — extra or missing pins break the public commitment',
+    ).toEqual({ ...DOCUMENTED_FIXTURE_DEPENDENCIES });
   });
 
   test('support-matrix.md still declines a minimum TypeScript version until a documented range is gated', async () => {
