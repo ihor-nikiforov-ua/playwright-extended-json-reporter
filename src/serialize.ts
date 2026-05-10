@@ -1,0 +1,432 @@
+import { createHash } from 'node:crypto';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { extname, join, relative, sep } from 'node:path';
+import type { TestCase, TestError, TestResult, TestStep } from '@playwright/test/reporter';
+import type {
+  RunboardLocation,
+  RunboardTestAttachment,
+  RunboardTestCase,
+  RunboardTestCaseSummary,
+  RunboardTestResult,
+  RunboardTestResultDisplayError,
+  RunboardTestResultSummary,
+  RunboardTestStep,
+} from './contract.js';
+
+export interface SerializeContext {
+  projectName: string;
+  fileName: string;
+  rootDir: string;
+  outputFolder: string;
+  attachmentsBaseURL: string;
+  noSnippets?: boolean;
+}
+
+export function serializeTestCase(test: TestCase, ctx: SerializeContext): RunboardTestCase {
+  const base = baseTestCase(test, ctx);
+  return {
+    ...base,
+    results: test.results.map((result) => serializeResult(test, result, ctx)),
+  };
+}
+
+export function summarizeTestCase(test: TestCase, ctx: SerializeContext): RunboardTestCaseSummary {
+  const base = baseTestCase(test, ctx);
+  return {
+    ...base,
+    results: test.results.map((result) => summarizeResult(result, ctx)),
+  };
+}
+
+function baseTestCase(
+  test: TestCase,
+  ctx: SerializeContext,
+): Omit<RunboardTestCaseSummary, 'results'> {
+  const titlePath = test.titlePath();
+  const path = titlePath.slice(3, -1);
+  const duration = test.results.reduce((acc, r) => acc + r.duration, 0);
+  const summary: Omit<RunboardTestCaseSummary, 'results'> = {
+    testId: test.id,
+    title: test.title,
+    path,
+    projectName: ctx.projectName,
+    location: relativeLocation(ctx.rootDir, test.location),
+    annotations: test.annotations.map((a) => ({ ...a })),
+    tags: [...test.tags],
+    outcome: test.outcome(),
+    duration,
+    ok: test.ok(),
+  };
+  if (test.repeatEachIndex !== undefined) {
+    summary.repeatEachIndex = test.repeatEachIndex;
+  }
+  return summary;
+}
+
+function serializeResult(
+  test: TestCase,
+  result: TestResult,
+  ctx: SerializeContext,
+): RunboardTestResult {
+  const attachments = serializeAttachments(collectAttachments(result), ctx);
+  return {
+    retry: result.retry,
+    startTime: result.startTime.toISOString(),
+    duration: result.duration,
+    steps: dedupeSteps(result.steps).map((d) => serializeStep(d, result.attachments, ctx)),
+    errors: formatDisplayErrors(test, result),
+    attachments,
+    status: result.status,
+    annotations: (result.annotations ?? []).map((a) => ({ ...a })),
+    workerIndex: result.workerIndex,
+  };
+}
+
+function summarizeResult(result: TestResult, ctx: SerializeContext): RunboardTestResultSummary {
+  const attachments = serializeAttachments(collectAttachments(result), ctx);
+  return {
+    attachments: attachments.map((a) => {
+      const summary: { name: string; contentType: string; path?: string } = {
+        name: a.name,
+        contentType: a.contentType,
+      };
+      if (a.path !== undefined) summary.path = a.path;
+      return summary;
+    }),
+    startTime: result.startTime.toISOString(),
+    workerIndex: result.workerIndex,
+  };
+}
+
+interface DedupedStep {
+  step: TestStep;
+  count: number;
+  duration: number;
+}
+
+function dedupeSteps(steps: readonly TestStep[]): DedupedStep[] {
+  const out: DedupedStep[] = [];
+  let last: DedupedStep | undefined;
+  for (const step of steps) {
+    const canDedupe =
+      !step.error && step.duration >= 0 && !!step.location?.file && step.steps.length === 0;
+    if (
+      canDedupe &&
+      last &&
+      step.category === last.step.category &&
+      step.title === last.step.title &&
+      step.location?.file === last.step.location?.file &&
+      step.location?.line === last.step.location?.line &&
+      step.location?.column === last.step.location?.column
+    ) {
+      last.count += 1;
+      last.duration += step.duration;
+      continue;
+    }
+    last = { step, count: 1, duration: step.duration };
+    out.push(last);
+    if (!canDedupe) last = undefined;
+  }
+  return out;
+}
+
+function serializeStep(
+  deduped: DedupedStep,
+  resultAttachments: readonly TestResult['attachments'][number][],
+  ctx: SerializeContext,
+): RunboardTestStep {
+  const { step, count, duration } = deduped;
+  const skipAnnotation = step.annotations?.find((a) => a.type === 'skip');
+  const title = skipAnnotation
+    ? `${step.title} (skipped${skipAnnotation.description ? `: ${skipAnnotation.description}` : ''})`
+    : step.title;
+  const out: RunboardTestStep = {
+    title,
+    startTime: step.startTime.toISOString(),
+    duration,
+    steps: dedupeSteps(step.steps).map((d) => serializeStep(d, resultAttachments, ctx)),
+    attachments: step.attachments
+      .map((attachment) => resultAttachments.indexOf(attachment))
+      .filter((index) => index !== -1),
+    count,
+  };
+  if (step.location !== undefined) {
+    out.location = relativeLocation(ctx.rootDir, step.location);
+  }
+  if (step.error !== undefined) {
+    out.error = step.error.message ?? step.error.value ?? '';
+  }
+  if (!ctx.noSnippets && step.location !== undefined) {
+    const snippet = readSourceSnippet(step.location.file, step.location.line, step.location.column);
+    if (snippet !== undefined) out.snippet = snippet;
+  }
+  if (skipAnnotation) out.skipped = true;
+  return out;
+}
+
+function formatDisplayErrors(test: TestCase, result: TestResult): RunboardTestResultDisplayError[] {
+  const out: RunboardTestResultDisplayError[] = [];
+  if (result.status === 'passed' && test.expectedStatus === 'failed') {
+    out.push({ message: 'Expected to fail, but passed.' });
+  }
+  if (result.status === 'interrupted') {
+    out.push({ message: 'Test was interrupted.' });
+  }
+  for (const error of result.errors ?? []) {
+    out.push(serializeDisplayError(error));
+  }
+  return out;
+}
+
+function serializeDisplayError(error: TestError): RunboardTestResultDisplayError {
+  const tokens: string[] = [];
+  const baseMessage = error.message ?? error.value ?? '';
+  tokens.push(baseMessage);
+  if (error.snippet !== undefined && error.snippet !== '') {
+    tokens.push('');
+    tokens.push(error.snippet);
+  }
+  if (error.stack !== undefined && error.stack !== '') {
+    const stackLines = stripMessageLineFromStack(error.stack, baseMessage);
+    if (stackLines.length > 0) tokens.push(stackLines.join('\n'));
+  }
+  if (error.cause) {
+    const cause = serializeDisplayError(error.cause);
+    tokens.push(`[cause]: ${cause.message}`);
+  }
+  const out: RunboardTestResultDisplayError = { message: tokens.join('\n') };
+  const codeframe = error.location
+    ? readSourceCodeframe(error.location.file, error.location.line, error.location.column)
+    : undefined;
+  if (codeframe !== undefined) out.codeframe = codeframe;
+  return out;
+}
+
+function stripMessageLineFromStack(stack: string, message: string): string[] {
+  const lines = stack.split('\n');
+  const firstMessageLine = message.split('\n')[0];
+  if (firstMessageLine && lines[0]?.includes(firstMessageLine)) {
+    return lines.slice(1);
+  }
+  return lines;
+}
+
+interface NormalizedAttachment {
+  name: string;
+  contentType: string;
+  path?: string;
+  body?: string | Buffer;
+}
+
+function collectAttachments(result: TestResult): NormalizedAttachment[] {
+  const attachments: NormalizedAttachment[] = [];
+  for (const a of result.attachments) {
+    const item: NormalizedAttachment = { name: a.name, contentType: a.contentType };
+    if (a.path !== undefined) item.path = a.path;
+    if (a.body !== undefined) item.body = a.body;
+    attachments.push(item);
+  }
+  for (const chunk of result.stdout ?? []) {
+    attachments.push(stdioAttachment(chunk, 'stdout'));
+  }
+  for (const chunk of result.stderr ?? []) {
+    attachments.push(stdioAttachment(chunk, 'stderr'));
+  }
+  return attachments;
+}
+
+function stdioAttachment(chunk: string | Buffer, name: 'stdout' | 'stderr'): NormalizedAttachment {
+  return {
+    name,
+    contentType: 'text/plain',
+    body: typeof chunk === 'string' ? chunk : chunk.toString('utf8'),
+  };
+}
+
+function serializeAttachments(
+  attachments: NormalizedAttachment[],
+  ctx: SerializeContext,
+): RunboardTestAttachment[] {
+  const out: RunboardTestAttachment[] = [];
+  let lastStdio: RunboardTestAttachment | undefined;
+  for (const a of attachments) {
+    const isStdio = (a.name === 'stdout' || a.name === 'stderr') && a.contentType === 'text/plain';
+    if (isStdio) {
+      const text = stripAnsiEscapes(
+        typeof a.body === 'string' ? a.body : (a.body?.toString('utf8') ?? ''),
+      );
+      if (lastStdio && lastStdio.name === a.name && lastStdio.contentType === a.contentType) {
+        lastStdio.body = (lastStdio.body ?? '') + text;
+        continue;
+      }
+      const merged: RunboardTestAttachment = {
+        name: a.name,
+        contentType: a.contentType,
+        body: text,
+      };
+      out.push(merged);
+      lastStdio = merged;
+      continue;
+    }
+    lastStdio = undefined;
+
+    if (a.path !== undefined) {
+      const rewritten = copyFileAttachment(a.path, ctx);
+      const item: RunboardTestAttachment = {
+        name: a.name,
+        contentType: a.contentType,
+        path: rewritten ?? a.path,
+      };
+      if (typeof a.body === 'string') item.body = a.body;
+      out.push(item);
+      continue;
+    }
+
+    if (Buffer.isBuffer(a.body)) {
+      if (isTextContentType(a.contentType)) {
+        const charset = a.contentType.match(/charset=([^\s;]+)/i)?.[1];
+        try {
+          const text = a.body.toString((charset ?? 'utf8') as BufferEncoding);
+          out.push({ name: a.name, contentType: a.contentType, body: text });
+          continue;
+        } catch {
+          // fall through to binary write
+        }
+      }
+      const written = writeBinaryAttachment(a.name, a.contentType, a.body, ctx);
+      out.push({ name: a.name, contentType: a.contentType, path: written });
+      continue;
+    }
+
+    const item: RunboardTestAttachment = { name: a.name, contentType: a.contentType };
+    if (typeof a.body === 'string') item.body = a.body;
+    out.push(item);
+  }
+  return out;
+}
+
+function copyFileAttachment(sourcePath: string, ctx: SerializeContext): string | undefined {
+  let buffer: Buffer;
+  try {
+    buffer = readFileSync(sourcePath);
+  } catch {
+    return undefined;
+  }
+  const sha1 = sha1Hex(buffer) + extname(sourcePath);
+  writeAttachmentFile(sha1, buffer, ctx);
+  return ctx.attachmentsBaseURL + sha1;
+}
+
+function writeBinaryAttachment(
+  name: string,
+  contentType: string,
+  buffer: Buffer,
+  ctx: SerializeContext,
+): string {
+  const ext =
+    sanitizeExtension(extname(name).replace(/^\./, '')) || mimeExtension(contentType) || 'dat';
+  const sha1 = `${sha1Hex(buffer)}.${ext}`;
+  writeAttachmentFile(sha1, buffer, ctx);
+  return ctx.attachmentsBaseURL + sha1;
+}
+
+function writeAttachmentFile(fileName: string, buffer: Buffer, ctx: SerializeContext): void {
+  const dataDir = join(ctx.outputFolder, 'data');
+  mkdirSync(dataDir, { recursive: true });
+  writeFileSync(join(dataDir, fileName), buffer);
+}
+
+function sha1Hex(buffer: Buffer): string {
+  return createHash('sha1').update(buffer).digest('hex');
+}
+
+function isTextContentType(contentType: string): boolean {
+  return contentType.startsWith('text/') || contentType.startsWith('application/json');
+}
+
+function sanitizeExtension(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_.-]+/g, '');
+}
+
+const MIME_EXTENSION_MAP: Readonly<Record<string, string>> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/jpg': 'jpg',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+  'video/mp4': 'mp4',
+  'video/webm': 'webm',
+  'application/zip': 'zip',
+  'application/json': 'json',
+  'application/octet-stream': 'bin',
+  'text/plain': 'txt',
+  'text/html': 'html',
+  'text/css': 'css',
+  'text/javascript': 'js',
+};
+
+function mimeExtension(contentType: string): string | undefined {
+  const base = contentType.split(';')[0]?.trim().toLowerCase();
+  if (!base) return undefined;
+  return MIME_EXTENSION_MAP[base];
+}
+
+function relativeLocation(
+  rootDir: string,
+  location: { file: string; line: number; column: number },
+): RunboardLocation {
+  return {
+    file: toPosixPath(relative(rootDir, location.file)),
+    line: location.line,
+    column: location.column,
+  };
+}
+
+function toPosixPath(p: string): string {
+  return sep === '/' ? p : p.split(sep).join('/');
+}
+
+function stripAnsiEscapes(value: string): string {
+  // Standard ANSI CSI/OSC escape sequences. Conservative pattern that matches
+  // Playwright's strip behavior for stdout/stderr text/plain attachments.
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape sequences include control chars
+  return value.replace(/\[[0-9;?]*[A-Za-z]/g, '');
+}
+
+function readSourceSnippet(file: string, line: number, column: number): string | undefined {
+  return makeCodeFrame(file, line, column, { linesAbove: 2, linesBelow: 2 });
+}
+
+function readSourceCodeframe(file: string, line: number, column: number): string | undefined {
+  return makeCodeFrame(file, line, column, { linesAbove: 5, linesBelow: 5 });
+}
+
+function makeCodeFrame(
+  file: string,
+  line: number,
+  column: number,
+  options: { linesAbove: number; linesBelow: number },
+): string | undefined {
+  let source: string;
+  try {
+    source = readFileSync(file, 'utf8');
+  } catch {
+    return undefined;
+  }
+  const lines = source.split('\n');
+  if (line < 1 || line > lines.length) return undefined;
+  const startLine = Math.max(1, line - options.linesAbove);
+  const endLine = Math.min(lines.length, line + options.linesBelow);
+  const lineNumberWidth = String(endLine).length;
+  const out: string[] = [];
+  for (let ln = startLine; ln <= endLine; ln++) {
+    const marker = ln === line ? '>' : ' ';
+    const padded = String(ln).padStart(lineNumberWidth);
+    out.push(`${marker} ${padded} | ${lines[ln - 1] ?? ''}`);
+    if (ln === line) {
+      const arrowColumn = Math.max(0, column - 1);
+      out.push(`  ${' '.repeat(lineNumberWidth)} | ${' '.repeat(arrowColumn)}^`);
+    }
+  }
+  return out.join('\n');
+}

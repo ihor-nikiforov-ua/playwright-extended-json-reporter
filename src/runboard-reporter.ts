@@ -23,6 +23,8 @@ import {
   type RunboardReport,
   type RunboardReportOptions,
   type RunboardStats,
+  type RunboardTestCase,
+  type RunboardTestCaseSummary,
   type RunboardTestFile,
   type RunboardTestFileSummary,
 } from './contract.js';
@@ -31,6 +33,7 @@ import {
   type RunboardReporterOptions,
   resolveRunboardOptions,
 } from './options.js';
+import { serializeTestCase, summarizeTestCase } from './serialize.js';
 
 export type { RunboardReporterOptions } from './options.js';
 
@@ -38,6 +41,7 @@ const RUNBOARD_LOG_PREFIX = 'playwright-runboard-reporter:';
 
 export class RunboardReporter implements Reporter {
   private readonly outputFolder: string;
+  private readonly attachmentsBaseURL: string;
   private readonly reportOptions: RunboardReportOptions;
   private readonly noOpOptionsToWarn: NoOpCompatibilityOptionName[];
   private playwrightVersion = '';
@@ -51,6 +55,7 @@ export class RunboardReporter implements Reporter {
   constructor(options: RunboardReporterOptions = {}) {
     const resolved = resolveRunboardOptions(options);
     this.outputFolder = resolved.outputFolder;
+    this.attachmentsBaseURL = resolved.attachmentsBaseURL;
     this.reportOptions = resolved.reportOptions;
     this.noOpOptionsToWarn = [...resolved.noOpOptionsSupplied];
   }
@@ -115,14 +120,21 @@ export class RunboardReporter implements Reporter {
     };
 
     const fileStats = this.computeFileStats();
+    const cases = this.collectTestCases();
 
     const fileSummaries: RunboardTestFileSummary[] = [];
     for (const file of this.testFiles.values()) {
-      await writeFile(join(outputFolder, `${file.fileId}.json`), JSON.stringify(file), 'utf8');
+      const fileCases = cases.get(file.fileId) ?? [];
+      const fullEntry: RunboardTestFile = {
+        fileId: file.fileId,
+        fileName: file.fileName,
+        tests: fileCases.map((entry) => entry.full),
+      };
+      await writeFile(join(outputFolder, `${file.fileId}.json`), JSON.stringify(fullEntry), 'utf8');
       fileSummaries.push({
         fileId: file.fileId,
         fileName: file.fileName,
-        tests: [],
+        tests: fileCases.map((entry) => entry.summary),
         stats: fileStats.get(file.fileId) ?? emptyStats(),
       });
     }
@@ -146,6 +158,50 @@ export class RunboardReporter implements Reporter {
     };
 
     await writeFile(join(outputFolder, 'report.json'), JSON.stringify(report), 'utf8');
+  }
+
+  private collectTestCases(): Map<
+    string,
+    Array<{ summary: RunboardTestCaseSummary; full: RunboardTestCase }>
+  > {
+    const out = new Map<
+      string,
+      Array<{ summary: RunboardTestCaseSummary; full: RunboardTestCase }>
+    >();
+    if (!this.rootSuite) {
+      return out;
+    }
+    for (const projectSuite of this.rootSuite.suites) {
+      const projectName = projectSuite.project()?.name ?? '';
+      for (const fileSuite of projectSuite.suites) {
+        const absolute = fileSuite.location?.file;
+        if (!absolute) {
+          continue;
+        }
+        const fileName = toPosixPath(relative(this.rootDir, absolute));
+        const fileId = sha1(fileName).slice(0, 20);
+        let bucket = out.get(fileId);
+        if (!bucket) {
+          bucket = [];
+          out.set(fileId, bucket);
+        }
+        for (const test of fileSuite.allTests()) {
+          const ctx = {
+            projectName,
+            fileName,
+            rootDir: this.rootDir,
+            outputFolder: resolve(this.outputFolder),
+            attachmentsBaseURL: this.attachmentsBaseURL,
+            noSnippets: this.reportOptions.noSnippets ?? false,
+          };
+          bucket.push({
+            summary: summarizeTestCase(test, ctx),
+            full: serializeTestCase(test, ctx),
+          });
+        }
+      }
+    }
+    return out;
   }
 
   private computeFileStats(): Map<string, RunboardStats> {
