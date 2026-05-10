@@ -63,8 +63,8 @@ test.describe('Playwright support-range compatibility gates', () => {
     ).toMatch(/min-supported:/);
     expect(
       yml,
-      'min-supported job must override @playwright/test to the canonical 1.59 lower bound',
-    ).toMatch(/@playwright\/test@1\.59/);
+      'min-supported job must override @playwright/test to the exact 1.59.0 lower bound so the lockfile cannot silently float to 1.59.x',
+    ).toMatch(/@playwright\/test@1\.59\.0(?!\d)/);
     expect(yml, 'min-supported job must run the Compatibility Smoke Suite').toContain(
       'npm run test:compat',
     );
