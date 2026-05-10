@@ -57,7 +57,12 @@ function baseTestCase(
     duration,
     ok: test.ok(),
   };
-  if (test.repeatEachIndex !== undefined) {
+  // Playwright's HTML reporter omits `repeatEachIndex` from serialized
+  // testCase shapes (see playwright/lib/reporters/html.js); its public
+  // reporter API exposes the field as a number that defaults to 0, so the
+  // Compatibility Fixture treats the omission as canonical and only emits
+  // the field when it has a meaningful (non-zero) value.
+  if (test.repeatEachIndex) {
     summary.repeatEachIndex = test.repeatEachIndex;
   }
   return summary;
@@ -140,6 +145,10 @@ function serializeStep(
   const title = skipAnnotation
     ? `${step.title} (skipped${skipAnnotation.description ? `: ${skipAnnotation.description}` : ''})`
     : step.title;
+  // Playwright's HTML reporter writes `skipped: !!skip-annotation` on every
+  // serialized step (see playwright/lib/reporters/html.js _createTestStep);
+  // emit the same boolean shape unconditionally so the Compatibility Fixture
+  // sees identical step payloads when no skip annotation is present.
   const out: RunboardTestStep = {
     title,
     startTime: step.startTime.toISOString(),
@@ -149,6 +158,7 @@ function serializeStep(
       .map((attachment) => resultAttachments.indexOf(attachment))
       .filter((index) => index !== -1),
     count,
+    skipped: skipAnnotation !== undefined,
   };
   if (step.location !== undefined) {
     out.location = relativeLocation(ctx.rootDir, step.location);
@@ -160,7 +170,6 @@ function serializeStep(
     const snippet = readSourceSnippet(step.location.file, step.location.line, step.location.column);
     if (snippet !== undefined) out.snippet = snippet;
   }
-  if (skipAnnotation) out.skipped = true;
   return out;
 }
 

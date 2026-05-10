@@ -57,7 +57,7 @@ export interface RunboardTestStep {
   steps: RunboardTestStep[];
   attachments: number[];
   count: number;
-  skipped?: boolean;
+  skipped: boolean;
 }
 
 export type RunboardErrorEvidenceSource = 'test-error' | 'status-derived';
