@@ -16,8 +16,14 @@
  *   compatibility oracle in Compatibility Fixtures, never a runtime
  *   dependency. A separate explicit decision is required before this
  *   formatter takes a runtime dependency on private Playwright internals.
+ *
+ *   `@babel/code-frame` is the same public Babel package Playwright HTML
+ *   reporter uses to render error codeframes. Importing it directly keeps the
+ *   codeframe byte-identical to Playwright's output for timeout-style errors
+ *   (catalog rows 1, 8, 9) without reaching into Playwright internals.
  */
 import { readFileSync } from 'node:fs';
+import { codeFrameColumns } from '@babel/code-frame';
 import type { TestCase, TestError, TestResult } from '@playwright/test/reporter';
 import type { RunboardTestResultDisplayError } from './contract.js';
 
@@ -54,9 +60,10 @@ function serializeDisplayError(error: TestError): RunboardTestResultDisplayError
     const cause = serializeDisplayError(error.cause);
     tokens.push(`[cause]: ${cause.message}`);
   }
-  const out: RunboardTestResultDisplayError = { message: tokens.join('\n') };
+  const formattedMessage = tokens.join('\n');
+  const out: RunboardTestResultDisplayError = { message: formattedMessage };
   const codeframe = error.location
-    ? readSourceCodeframe(error.location.file, error.location.line, error.location.column)
+    ? createErrorCodeframe(formattedMessage, error.location)
     : undefined;
   if (codeframe !== undefined) out.codeframe = codeframe;
   return out;
@@ -71,29 +78,49 @@ function stripMessageLineFromStack(stack: string, message: string): string[] {
   return lines;
 }
 
-function readSourceCodeframe(file: string, line: number, column: number): string | undefined {
+/**
+ * Mirrors Playwright HTML reporter's `createErrorCodeframe` so timeout and
+ * other location-bearing Display Errors render the same Babel codeframe:
+ * the source is suffixed with `\n//` (Playwright's trailing terminator that
+ * forces an empty line + comment so a one-frame stack still highlights), the
+ * message is the stripped first line of the formatted Display Error message,
+ * and Babel formats the entire file via `linesAbove: 100, linesBelow: 100`.
+ *
+ * Returns `undefined` when the source file cannot be read so a missing or
+ * relocated source file leaves the rest of the Display Error intact rather
+ * than throwing during reporter shutdown.
+ */
+function createErrorCodeframe(
+  message: string,
+  location: { file: string; line: number; column: number },
+): string | undefined {
   let source: string;
   try {
-    source = readFileSync(file, 'utf8');
+    source = readFileSync(location.file, 'utf8');
   } catch {
     return undefined;
   }
-  const lines = source.split('\n');
-  if (line < 1 || line > lines.length) return undefined;
-  const linesAbove = 5;
-  const linesBelow = 5;
-  const startLine = Math.max(1, line - linesAbove);
-  const endLine = Math.min(lines.length, line + linesBelow);
-  const lineNumberWidth = String(endLine).length;
-  const out: string[] = [];
-  for (let ln = startLine; ln <= endLine; ln++) {
-    const marker = ln === line ? '>' : ' ';
-    const padded = String(ln).padStart(lineNumberWidth);
-    out.push(`${marker} ${padded} | ${lines[ln - 1] ?? ''}`);
-    if (ln === line) {
-      const arrowColumn = Math.max(0, column - 1);
-      out.push(`  ${' '.repeat(lineNumberWidth)} | ${' '.repeat(arrowColumn)}^`);
-    }
-  }
-  return out.join('\n');
+  const messageHeadline = stripAnsiEscapes(message).split('\n')[0] || undefined;
+  return codeFrameColumns(
+    `${source}\n//`,
+    { start: { line: location.line, column: location.column } },
+    {
+      highlightCode: false,
+      linesAbove: 100,
+      linesBelow: 100,
+      ...(messageHeadline !== undefined ? { message: messageHeadline } : {}),
+    },
+  );
+}
+
+// Standard ANSI CSI escape sequences. The Display Error message is built from
+// `error.message`, `error.snippet`, and stack tail tokens that Playwright may
+// have wrapped in red/dim colors via `colors.red(...)`/`colors.dim(...)`. The
+// Babel oracle strips ANSI before extracting the headline so the codeframe
+// message column does not bleed escape codes into the column-arrow line.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape sequences include control chars
+const ANSI_ESCAPE_PATTERN = /\[[0-9;]*[A-Za-z]/g;
+
+function stripAnsiEscapes(value: string): string {
+  return value.replace(ANSI_ESCAPE_PATTERN, '');
 }
