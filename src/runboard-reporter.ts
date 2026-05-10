@@ -19,6 +19,7 @@ import {
 } from './cleanup.js';
 import {
   RUNBOARD_SCHEMA_VERSION,
+  type RunboardMachine,
   type RunboardMetadata,
   type RunboardReport,
   type RunboardReportOptions,
@@ -39,6 +40,31 @@ export type { RunboardReporterOptions } from './options.js';
 
 const RUNBOARD_LOG_PREFIX = 'playwright-runboard-reporter:';
 
+// Compatibility Adapter shape for Playwright merge-reports' per-shard hooks.
+// `onReportConfigure` and `onReportEnd` are not part of the public Reporter
+// interface; merge-reports' Multiplexer dispatches them through optional
+// chaining, so any reporter that implements them (with these payloads) is
+// invoked once per blob shard during a `merge-reports` replay. Match
+// Playwright's HTML reporter usage of these hooks closely so the merged
+// Runboard Data Bundle's `report.machines[]` carries the same shard
+// metadata (tag, shardIndex, startTime, duration).
+//
+// These payload shapes are Playwright-internal, so each interface and the
+// hooks that consume them are `@internal`: `stripInternal` removes them from
+// `dist/runboard-reporter.d.ts` while preserving the runtime methods that
+// Playwright's Multiplexer needs to invoke.
+/** @internal */
+interface MergeReportConfigureParams {
+  reportPath: string;
+  config: { tags?: string[]; shard?: { current: number; total: number } | null };
+}
+
+/** @internal */
+interface MergeReportEndParams {
+  reportPath: string;
+  result: { startTime: Date; duration: number };
+}
+
 export class RunboardReporter implements Reporter {
   private readonly outputFolder: string;
   private readonly attachmentsBaseURL: string;
@@ -49,8 +75,24 @@ export class RunboardReporter implements Reporter {
   private projectNames: string[] = [];
   private rootDir = '';
   private rootSuite: Suite | null = null;
+  private pendingConfig: FullConfig | null = null;
   private readonly testFiles = new Map<string, RunboardTestFile>();
   private readonly topLevelErrors: TestError[] = [];
+  private readonly shardConfigs = new Map<
+    string,
+    { tags: string[]; shard: { current: number; total: number } | null }
+  >();
+  private readonly machines: RunboardMachine[] = [];
+
+  // Declare v2 so Playwright's reporter dispatcher delivers the merge-reports
+  // hooks (`onReportConfigure`, `onReportEnd`) directly. Without this,
+  // Playwright wraps v1 reporters in `ReporterV2Wrapper`, which only proxies
+  // `onConfigure`/`onBegin`/`onTestBegin`/...; the merge-reports hooks would
+  // be silently dropped and `report.machines[]` would never populate.
+  /** @internal */
+  version(): 'v2' {
+    return 'v2';
+  }
 
   constructor(options: RunboardReporterOptions = {}) {
     const resolved = resolveRunboardOptions(options);
@@ -68,7 +110,63 @@ export class RunboardReporter implements Reporter {
     this.topLevelErrors.push(error);
   }
 
-  onBegin(config: FullConfig, suite: Suite): void {
+  /** @internal */
+  onReportConfigure(params: MergeReportConfigureParams): void {
+    this.shardConfigs.set(params.reportPath, {
+      tags: params.config.tags ?? [],
+      shard: params.config.shard ?? null,
+    });
+  }
+
+  /** @internal */
+  onReportEnd(params: MergeReportEndParams): void {
+    const config = this.shardConfigs.get(params.reportPath);
+    if (!config) {
+      return;
+    }
+    const machine: RunboardMachine = {
+      tag: config.tags,
+      startTime: params.result.startTime.getTime(),
+      duration: params.result.duration,
+    };
+    if (config.shard) {
+      machine.shardIndex = config.shard.current;
+    }
+    this.machines.push(machine);
+  }
+
+  onConfigure(config: FullConfig): void {
+    this.pendingConfig = config;
+  }
+
+  // Public Playwright Reporter v2 onBegin — this is the only overload that
+  // surfaces in `dist/runboard-reporter.d.ts`.
+  onBegin(suite: Suite): void;
+  // v1-style overload kept as a Compatibility Adapter for `ReporterV2Wrapper`
+  // dispatch and for unit tests that pass `(config, suite)` directly. Marked
+  // `@internal` so `stripInternal` excludes it from the public declaration
+  // surface; the runtime behavior is preserved by the implementation below.
+  /** @internal */
+  onBegin(config: FullConfig, suite: Suite): void;
+  onBegin(configOrSuite: FullConfig | Suite, maybeSuite?: Suite): void {
+    let config: FullConfig;
+    let suite: Suite;
+    if (maybeSuite !== undefined) {
+      // v1-style call: `onBegin(config, suite)`. The pending config from a
+      // prior `onConfigure` is not consulted here; the explicit argument
+      // always wins.
+      config = configOrSuite as FullConfig;
+      suite = maybeSuite;
+    } else {
+      // v2-style call: `onBegin(suite)`. Playwright dispatched `onConfigure`
+      // first, so use the stashed config.
+      if (!this.pendingConfig) {
+        throw new Error('RunboardReporter: onBegin(suite) called before onConfigure(config)');
+      }
+      config = this.pendingConfig;
+      suite = configOrSuite as Suite;
+    }
+
     this.playwrightVersion = config.version;
     this.configMetadata = (config.metadata ?? {}) as Record<string, unknown>;
     this.projectNames = suite.suites.map((projectSuite) => projectSuite.project()?.name ?? '');
@@ -154,7 +252,7 @@ export class RunboardReporter implements Reporter {
       stats: aggregateStats,
       errors: this.topLevelErrors.map(formatTopLevelError),
       options: this.reportOptions,
-      machines: [],
+      machines: this.machines,
     };
 
     await writeFile(join(outputFolder, 'report.json'), JSON.stringify(report), 'utf8');

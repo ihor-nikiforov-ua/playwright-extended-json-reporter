@@ -8,6 +8,7 @@
     "declarationMap": true,
     "sourceMap": true,
     "isolatedDeclarations": true,
+    "stripInternal": true,
     "noEmitOnError": true
   },
   "include": ["src/**/*.ts"]
