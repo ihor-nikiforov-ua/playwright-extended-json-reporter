@@ -67,9 +67,13 @@ const EXPECTED_PARITY_FAILURES: ReadonlySet<number> = new Set<number>([
   // timeouts). Issue #37 dropped catalog IDs 10–17 (locator, actionability,
   // and disposed-handle failures); their Call logs and locator-preview text
   // now reach parity through the same `parseErrorStack` partition that
-  // issue #36 added for action-style timeouts.
-  4, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41,
-  42, 43, 44,
+  // issue #36 added for action-style timeouts. Issue #38 dropped catalog
+  // IDs 4, 18, 19, 20, 22, 23 (web-first assertion timeout, toHaveText,
+  // toContainText, toHaveValue, toHaveCount, toHaveURL/toHaveTitle); their
+  // matcher hint, Locator/Expected/Received/Timeout block, and Call log all
+  // round-trip through the same partition because Playwright embeds the
+  // multi-line matcher message at the head of `error.stack`.
+  21, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44,
 ]);
 
 test.describe('Error Catalog — Display Error parity', () => {
