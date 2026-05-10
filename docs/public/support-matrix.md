@@ -46,31 +46,25 @@ The package publishes generated `.d.ts` declarations, not TypeScript source.
 TypeScript Declaration Compatibility describes which TypeScript compiler
 versions are expected to consume the published declarations.
 
-This section documents the policy. A dedicated declaration compatibility
-gate that packs the published declarations and runs them against documented
-TypeScript compiler versions is **planned** but does not yet exist in this
-repository. Until it lands, the only TypeScript checks that run on every
-change are the in-repo `tsc` projects that compile this codebase against
-the development-pinned TypeScript version.
-
 - Declaration target: the generated declarations follow the package's
   `tsconfig.build.json` settings and ship under `dist/`.
-- Currently tested: the repository runs `tsc --noEmit` against
-  `tsconfig.build.json`, `tsconfig.test.json`, and `tsconfig.json` under the
-  development-pinned TypeScript version. These checks cover the repository
-  TypeScript profiles and the current compiler, not packed declarations
-  across a matrix of consumer TypeScript versions.
-- Planned: a future declaration compatibility gate will install or pack the
-  package into a consumer fixture and run `tsc` against an explicit list of
-  TypeScript compiler versions. The specific compiler versions will be
-  documented in [`CHANGELOG.md`](../../CHANGELOG.md) and named here in the
-  same Release PR that adds the gate, before any compiler version is
-  claimed as supported.
-- Not supported (once a range exists): TypeScript compiler versions outside
-  the documented range. The package does not publish TypeScript source, so
-  consumers compile the declarations directly.
+- Tested compiler versions: TypeScript **6.0.3**. The consumer-style
+  declaration compatibility gate at
+  [`tests/repo/declaration-compatibility.spec.ts`](../../tests/repo/declaration-compatibility.spec.ts)
+  packs the built package, installs it into a fresh consumer fixture,
+  installs the listed TypeScript compiler version(s), and runs
+  `tsc --noEmit` against a consumer source file that imports every public
+  export.
+- Verification: the gate runs as part of `npm run verify` through the
+  Playwright test suite invoked by `npm test`. Drift between this section
+  and the actual gate is rejected by docs-consistency tests in the same
+  spec.
+- Not supported: TypeScript compiler versions outside the tested list. The
+  package does not publish TypeScript source, so consumers compile the
+  declarations directly.
 
-A minimum TypeScript compiler version is intentionally not pinned in this
-matrix until the planned declaration compatibility gate proves it. Until
-then, this section is policy-only and does not promise compatibility with
-any specific TypeScript compiler version.
+There is no minimum supported TypeScript compiler version. The Support
+Matrix Policy refuses to claim a compiler range broader than the
+declaration compatibility gate actually covers, so the tested list above is
+the only public commitment. The tested list expands version-by-version as
+the gate gains coverage.

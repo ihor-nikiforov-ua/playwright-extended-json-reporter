@@ -82,16 +82,25 @@ test.describe('Reporter declaration surface', () => {
     expect(dts).not.toContain('reportPath');
   });
 
-  test('public reporter d.ts exposes only the v2 onBegin(suite) overload', async () => {
+  test('public reporter d.ts exposes both onBegin overloads so the class implements Playwright Reporter', async () => {
     const dts = await readFile(reporterDts, 'utf8');
 
-    expect(dts, 'public d.ts must expose the v2 onBegin overload').toMatch(
+    // The v2 overload is the preferred call path documented for editor hovers.
+    expect(dts, 'public d.ts must expose the v2 onBegin(suite) overload').toMatch(
       /onBegin\s*\(\s*suite\s*:\s*Suite\s*\)\s*:\s*void/,
     );
 
-    // The v1-style 2-arg overload and the union implementation signature must not leak.
+    // The v1 overload must stay public so the class is structurally assignable
+    // to Playwright's `Reporter.onBegin?(config, suite)` signature. A
+    // consumer-style `tsc` over `dist/runboard-reporter.d.ts` would otherwise
+    // fail with TS2416 because `implements Reporter` requires a matching
+    // overload (see tests/repo/declaration-compatibility.spec.ts).
+    expect(dts, 'public d.ts must expose the v1 onBegin(config, suite) overload').toMatch(
+      /onBegin\s*\(\s*config\s*:\s*FullConfig\s*,\s*suite\s*:\s*Suite\s*\)\s*:\s*void/,
+    );
+
+    // The union implementation signature is still an internal detail and must not leak.
     expect(dts).not.toMatch(/onBegin\s*\(\s*configOrSuite\b/);
-    expect(dts).not.toMatch(/onBegin\s*\(\s*config\s*:\s*FullConfig\s*,/);
   });
 
   test('RUNBOARD_SCHEMA_VERSION carries TSDoc in the public contract declarations', async () => {
