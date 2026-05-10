@@ -596,6 +596,181 @@ test.describe('Display Error Formatter — public boundary', () => {
     expect(error.message.split('Received: "Hello"').length - 1).toBe(1);
   });
 
+  test('toBeVisible against missing element preserves matcher hint, Expected/Timeout/Error block, and Call log (catalog #21)', () => {
+    // Catalog #21 parity: when `toBeVisible` runs against an unfound locator,
+    // Playwright omits the `Received:` line and instead emits an
+    // `Error: element(s) not found` line via the matcher's `errorMessage`
+    // pathway. The full multi-line content is embedded in `error.message` and
+    // again at the head of `error.stack` before the first `    at ` frame, so
+    // the parseErrorStack partition is what keeps the structured block and
+    // Call log from rendering twice in the Display Error message.
+    const message = [
+      'Error: expect(locator).toBeVisible() failed',
+      '',
+      "Locator: locator('#missing')",
+      'Expected: visible',
+      'Timeout: 100ms',
+      'Error: element(s) not found',
+      '',
+      'Call log:',
+      '  - Expect "toBeVisible" with timeout 100ms',
+      "  - waiting for locator('#missing')",
+      '',
+    ].join('\n');
+    const stack = `${message}\n    at /repo/tests/to-be-visible.spec.ts:4:42`;
+    const run = fakeRun({
+      rootDir: '/repo',
+      files: [
+        {
+          fileName: '/repo/tests/to-be-visible.spec.ts',
+          tests: [
+            {
+              title: 'toBeVisible fails when the element is missing',
+              status: 'failed',
+              expectedStatus: 'passed',
+              results: [{ status: 'failed', errors: [{ message, stack }] }],
+            },
+          ],
+        },
+      ],
+    });
+    const { test: t, result } = pickTestAndResult(run);
+
+    const [error] = formatDisplayErrors(t, result);
+    if (!error) throw new Error('expected Display Error');
+
+    expect(error.message).toContain('expect(locator).toBeVisible() failed');
+    expect(error.message).toContain("Locator: locator('#missing')");
+    expect(error.message).toContain('Expected: visible');
+    expect(error.message).toContain('Timeout: 100ms');
+    expect(error.message).toContain('Error: element(s) not found');
+    expect(error.message).toContain('Call log:');
+    expect(error.message).toContain('    at /repo/tests/to-be-visible.spec.ts:4:42');
+    expect(error.message.split('Call log:').length - 1).toBe(1);
+    expect(error.message.split('Expected: visible').length - 1).toBe(1);
+    expect(error.message.split('Error: element(s) not found').length - 1).toBe(1);
+  });
+
+  test('toHaveAttribute preserves matcher hint, Locator/Expected/Received block, and Call log (catalog #24)', () => {
+    // Catalog #24 parity: attribute-shaped matcher failures ride the
+    // `toMatchText` pathway, so the structured block carries
+    // `Expected: "<value>"`, `Received: "<value>"`, and the Call log records
+    // both `locator resolved to <a …>` and `unexpected value "…"`. As with the
+    // toHaveText shape (catalog #18), the parseErrorStack partition is what
+    // prevents the structured block from being re-emitted as stack tail.
+    const message = [
+      'Error: expect(locator).toHaveAttribute(expected) failed',
+      '',
+      "Locator:  locator('#a')",
+      'Expected: "https://example.com"',
+      'Received: "https://other.com"',
+      'Timeout:  100ms',
+      '',
+      'Call log:',
+      '  - Expect "toHaveAttribute" with timeout 100ms',
+      "  - waiting for locator('#a')",
+      '    2 × locator resolved to <a id="a" href="https://other.com">x</a>',
+      '      - unexpected value "https://other.com"',
+      '',
+    ].join('\n');
+    const stack = `${message}\n    at /repo/tests/to-have-attribute.spec.ts:4:36`;
+    const run = fakeRun({
+      rootDir: '/repo',
+      files: [
+        {
+          fileName: '/repo/tests/to-have-attribute.spec.ts',
+          tests: [
+            {
+              title: 'toHaveAttribute fails on attribute mismatch',
+              status: 'failed',
+              expectedStatus: 'passed',
+              results: [{ status: 'failed', errors: [{ message, stack }] }],
+            },
+          ],
+        },
+      ],
+    });
+    const { test: t, result } = pickTestAndResult(run);
+
+    const [error] = formatDisplayErrors(t, result);
+    if (!error) throw new Error('expected Display Error');
+
+    expect(error.message).toContain('expect(locator).toHaveAttribute(expected) failed');
+    expect(error.message).toContain("Locator:  locator('#a')");
+    expect(error.message).toContain('Expected: "https://example.com"');
+    expect(error.message).toContain('Received: "https://other.com"');
+    expect(error.message).toContain('Timeout:  100ms');
+    expect(error.message).toContain('Call log:');
+    expect(error.message).toContain(
+      '    2 × locator resolved to <a id="a" href="https://other.com">x</a>',
+    );
+    expect(error.message).toContain('      - unexpected value "https://other.com"');
+    expect(error.message).toContain('    at /repo/tests/to-have-attribute.spec.ts:4:36');
+    expect(error.message.split('Call log:').length - 1).toBe(1);
+    expect(error.message.split('Expected: "https://example.com"').length - 1).toBe(1);
+    expect(error.message.split('Received: "https://other.com"').length - 1).toBe(1);
+  });
+
+  test('toBeChecked preserves matcher hint, Locator/Expected/Received block, and Call log (catalog #25)', () => {
+    // Catalog #25 parity: state-flag matchers (`toBeChecked`, `toBeEnabled`,
+    // `toBeDisabled`, `toBeFocused`, …) ride the `toBeTruthy` pathway with a
+    // word expected (`checked`/`unchecked`/`enabled`/…) and a matching
+    // `Received:` line, plus the Call log emits `locator resolved to <input
+    // …>` and `unexpected value "<state>"`. The partition keeps the structured
+    // block intact in the Display Error message; a "drop only the first stack
+    // line" regression would re-render every line below the matcher hint as
+    // stack tail.
+    const message = [
+      'Error: expect(locator).toBeChecked() failed',
+      '',
+      "Locator:  locator('#c')",
+      'Expected: checked',
+      'Received: unchecked',
+      'Timeout:  100ms',
+      '',
+      'Call log:',
+      '  - Expect "toBeChecked" with timeout 100ms',
+      "  - waiting for locator('#c')",
+      '    2 × locator resolved to <input id="c" type="checkbox"/>',
+      '      - unexpected value "unchecked"',
+      '',
+    ].join('\n');
+    const stack = `${message}\n    at /repo/tests/to-be-checked.spec.ts:4:36`;
+    const run = fakeRun({
+      rootDir: '/repo',
+      files: [
+        {
+          fileName: '/repo/tests/to-be-checked.spec.ts',
+          tests: [
+            {
+              title: 'toBeChecked fails on unchecked state',
+              status: 'failed',
+              expectedStatus: 'passed',
+              results: [{ status: 'failed', errors: [{ message, stack }] }],
+            },
+          ],
+        },
+      ],
+    });
+    const { test: t, result } = pickTestAndResult(run);
+
+    const [error] = formatDisplayErrors(t, result);
+    if (!error) throw new Error('expected Display Error');
+
+    expect(error.message).toContain('expect(locator).toBeChecked() failed');
+    expect(error.message).toContain("Locator:  locator('#c')");
+    expect(error.message).toContain('Expected: checked');
+    expect(error.message).toContain('Received: unchecked');
+    expect(error.message).toContain('Timeout:  100ms');
+    expect(error.message).toContain('Call log:');
+    expect(error.message).toContain('    2 × locator resolved to <input id="c" type="checkbox"/>');
+    expect(error.message).toContain('      - unexpected value "unchecked"');
+    expect(error.message).toContain('    at /repo/tests/to-be-checked.spec.ts:4:36');
+    expect(error.message.split('Call log:').length - 1).toBe(1);
+    expect(error.message.split('Expected: checked').length - 1).toBe(1);
+    expect(error.message.split('Received: unchecked').length - 1).toBe(1);
+  });
+
   test('disposed-context error preserves headline and stack tail (catalog #17)', () => {
     // Catalog #17 parity: disposed-context errors ("Execution context was
     // destroyed", "JSHandle is disposed", "Frame was detached") arrive as a
