@@ -14,11 +14,14 @@ export type NoOpCompatibilityOptionName = (typeof NO_OP_COMPATIBILITY_OPTIONS)[n
  * Options accepted by the {@link RunboardReporter} constructor and by
  * Playwright's `reporter:` array.
  *
- * Option names that also apply to Playwright's official HTML reporter use
- * the same name and default. Options that only make sense for a rendered
- * HTML report (`open`, `host`, `port`, `doNotInlineAssets`) are accepted
- * for configuration compatibility and ignored at runtime with a once-per-
- * option warning during `onBegin`.
+ * Option names that also apply to Playwright's official HTML reporter
+ * reuse the Playwright option name. Defaults can differ from Playwright's
+ * HTML reporter so the Runboard Data Bundle defaults match the Runboard
+ * output contract (for example, `outputFolder` defaults to
+ * `'playwright-runboard-report'`, not Playwright's `'playwright-report'`).
+ * Options that only make sense for a rendered HTML report (`open`, `host`,
+ * `port`, `doNotInlineAssets`) are accepted for configuration compatibility
+ * and ignored at runtime with a once-per-option warning during `onBegin`.
  *
  * Environment-variable overrides and precedence are documented in
  * `docs/public/options.md`.
