@@ -1,0 +1,43 @@
+name: Error Catalog Suite
+
+# The Error Catalog Suite proves all 45 Error Types from the Error Catalog
+# survive Runboard Data Contract serialization. It is heavier than the
+# Compatibility Smoke Suite that runs on every PR, so this workflow only fires
+# on demand (workflow_dispatch) or on a weekly schedule. Normal PR feedback
+# stays fast through the canonical `verify` gate in ci.yml.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  catalog:
+    name: Error Catalog Suite
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build reporter
+        run: npm run build
+
+      - name: Run Error Catalog Suite
+        run: npm run test:catalog
