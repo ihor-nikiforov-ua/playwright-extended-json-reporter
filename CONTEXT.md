@@ -223,7 +223,7 @@ _Avoid_: Full HTML reporter feature parity, report-serving parity, UI parity
 - The **Runboard Data Contract** includes **Attachment Assets**, following Playwright HTML reporter behavior: path attachments are copied into the data bundle, text bodies may be inlined, stdout/stderr are represented as attachments, and traces/screenshots remain navigable by the Runboard.
 - The **Report Summary** includes a **Schema Version**, **Reporter Version**, and Playwright package version.
 - The Playwright package version in **Runboard Metadata** comes from Playwright's public `FullConfig.version` string for the reported run.
-- The first supported **Schema Version** is `1.0.0`; the **Reporter Version** may still be a `0.x` package version while the reporter implementation matures.
+- The first supported **Schema Version** is `1.0.0`; the current **Schema Version** is `1.1.0` after adding optional **Source Excerpts** under `result.runboard.evidence[].sourceExcerpt`. The **Reporter Version** may still be a `0.x` package version while the reporter implementation matures.
 - The **Schema Version Constant** is the single code-level source for `report.runboard.schemaVersion`.
 - The **Runboard Data Contract** preserves Playwright HTML reporter field names where possible; any **Runboard Extension** is namespaced away from Playwright-shaped fields.
 - **Runboard Metadata** contains only required string fields: `schemaVersion`, `reporterVersion`, and `playwrightVersion`.

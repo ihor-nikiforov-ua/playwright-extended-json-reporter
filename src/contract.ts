@@ -1,4 +1,4 @@
-export const RUNBOARD_SCHEMA_VERSION = '1.0.0';
+export const RUNBOARD_SCHEMA_VERSION = '1.1.0';
 
 export interface RunboardLocation {
   file: string;
@@ -62,6 +62,14 @@ export interface RunboardTestStep {
 
 export type RunboardErrorEvidenceSource = 'test-error' | 'status-derived';
 
+export interface RunboardSourceExcerpt {
+  file: string;
+  startLine: number;
+  lines: string[];
+  highlightedLine: number;
+  highlightedColumn?: number;
+}
+
 export interface RunboardTestErrorEvidence {
   source: 'test-error';
   message?: string;
@@ -72,6 +80,7 @@ export interface RunboardTestErrorEvidence {
   stepPath?: string[];
   stepCategory?: string;
   attachmentIndexes?: number[];
+  sourceExcerpt?: RunboardSourceExcerpt;
   cause?: RunboardErrorEvidence;
 }
 
@@ -85,6 +94,7 @@ export interface RunboardStatusDerivedErrorEvidence {
   stepPath?: string[];
   stepCategory?: string;
   attachmentIndexes?: number[];
+  sourceExcerpt?: RunboardSourceExcerpt;
   cause?: RunboardErrorEvidence;
 }
 

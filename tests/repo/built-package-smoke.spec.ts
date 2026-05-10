@@ -39,7 +39,7 @@ function check(label, value) {
 check('default export is a function', typeof RunboardReporter === 'function');
 check('named export is a function', typeof NamedRunboardReporter === 'function');
 check('default and named exports are identical', RunboardReporter === NamedRunboardReporter);
-check('schema version is 1.0.0', RUNBOARD_SCHEMA_VERSION === '1.0.0');
+check('schema version is 1.1.0', RUNBOARD_SCHEMA_VERSION === '1.1.0');
 
 const reporter = new RunboardReporter();
 check('reporter implements onBegin', typeof reporter.onBegin === 'function');

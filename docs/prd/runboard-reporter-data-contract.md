@@ -81,7 +81,7 @@ The Runboard owns rendering, history storage, Previous Run comparison, and Error
 - Preserve Playwright HTML reporter field names where possible.
 - Export `Runboard`-prefixed public data-contract types rather than bare names such as `TestCase` or `TestResult`.
 - Put canonical Runboard Data Contract types and schema constants in `src/contract.ts`, and re-export them from `src/index.ts`.
-- Export these public data-contract types for the first supported schema: `RunboardReport`, `RunboardReportOptions`, `RunboardMetadata`, `RunboardStats`, `RunboardLocation`, `RunboardMachine`, `RunboardTestAnnotation`, `RunboardTestFile`, `RunboardTestFileSummary`, `RunboardTestCase`, `RunboardTestCaseSummary`, `RunboardTestResult`, `RunboardTestResultSummary`, `RunboardTestAttachment`, `RunboardTestStep`, `RunboardResultEvidence`, and `RunboardErrorEvidence`.
+- Export these public data-contract types for the first supported schema: `RunboardReport`, `RunboardReportOptions`, `RunboardMetadata`, `RunboardStats`, `RunboardLocation`, `RunboardMachine`, `RunboardTestAnnotation`, `RunboardTestFile`, `RunboardTestFileSummary`, `RunboardTestCase`, `RunboardTestCaseSummary`, `RunboardTestResult`, `RunboardTestResultSummary`, `RunboardTestAttachment`, `RunboardTestStep`, `RunboardResultEvidence`, and `RunboardErrorEvidence`. Schema `1.1.0` adds `RunboardSourceExcerpt` to the public type surface.
 - Preserve tags, project names, and repeat indexes as primitive fields on the Playwright-compatible report and test-case shapes: `tags: string[]`, `projectName: string`, `projectNames: string[]`, and `repeatEachIndex?: number`.
 - Define `RunboardReport` as structurally mirroring Playwright's serialized HTML report field shape plus `runboard: RunboardMetadata`.
 - Match Playwright's split-file HTML report boundary: `report.json` contains `RunboardTestFileSummary[]` with `RunboardTestCaseSummary[]` and lightweight `RunboardTestResultSummary[]`; each `<fileId>.json` contains a full `RunboardTestFile` with `RunboardTestCase[]` and full `RunboardTestResult[]`.
@@ -89,7 +89,7 @@ The Runboard owns rendering, history storage, Previous Run comparison, and Error
 - Add Runboard Extensions only under `report.runboard` and `result.runboard` in the first contract.
 - Keep `report.runboard` minimal: `schemaVersion`, `reporterVersion`, and `playwrightVersion`.
 - Define `RunboardMetadata` with exactly three required string fields: `schemaVersion`, `reporterVersion`, and `playwrightVersion`.
-- Export `RUNBOARD_SCHEMA_VERSION = '1.0.0'` from `src/contract.ts` as the single code-level schema version source.
+- Export `RUNBOARD_SCHEMA_VERSION = '1.1.0'` from `src/contract.ts` as the single code-level schema version source. The first supported Runboard Data Contract was `1.0.0`; the schema bumped to `1.1.0` when optional Source Excerpts were added under `result.runboard.evidence[].sourceExcerpt` as a backward-compatible expansion.
 - Write `report.runboard.schemaVersion` from `RUNBOARD_SCHEMA_VERSION`.
 - Write `report.runboard.playwrightVersion` from Playwright's public `FullConfig.version` string for the run being reported.
 - Use semver for `report.runboard.schemaVersion`, starting the first supported Runboard Data Contract at `1.0.0`.
@@ -101,7 +101,10 @@ The Runboard owns rendering, history storage, Previous Run comparison, and Error
 - When `result.runboard` exists, `result.runboard.evidence[i]` is the structured evidence for `result.errors[i]`, where `result.errors[]` is the serialized HTML-report display error array, not Playwright's raw public reporter API `TestResult.errors[]`.
 - Define Structured Error Evidence as a discriminated union with `source: 'test-error'` for evidence derived from a Playwright `TestError` and `source: 'status-derived'` for failures derived from result or expected-status logic.
 - Document that Playwright does not expose these source labels; they are Runboard Data Contract provenance labels for the branches currently flattened by Playwright's `formatResultFailure()`: status/expected-status display entries and formatted raw `result.errors[]` entries.
-- Define `RunboardErrorEvidence` with only `source`, `message`, `stack`, `value`, `location`, `snippet`, `stepPath`, `stepCategory`, `attachmentIndexes`, and recursive `cause`; `status-derived` evidence requires `message`, while other fields remain optional.
+- Define `RunboardErrorEvidence` with only `source`, `message`, `stack`, `value`, `location`, `snippet`, `stepPath`, `stepCategory`, `attachmentIndexes`, optional `sourceExcerpt`, and recursive `cause`; `status-derived` evidence requires `message`, while other fields remain optional.
+- Define `RunboardSourceExcerpt` with required `file` (root-relative POSIX path), `startLine` (1-based), `lines` (raw source slice), and `highlightedLine` (1-based), plus optional `highlightedColumn` (1-based).
+- Default Source Excerpt range is two lines above the highlighted line, the highlighted line, and two lines below it, clipped at file boundaries; emit no `sourceExcerpt` when evidence has no `location`, the source file cannot be read, or the highlighted line is outside the file.
+- `noSnippets: true` suppresses Source Excerpts on every evidence entry, matching its role as the source-snippet privacy and size control.
 - Use the public Playwright reporter API as the default serializer source.
 - Use Compatibility Adapters only for specific gaps where public API data is insufficient, including the merged-report machine metadata hooks needed to match Playwright's HTML reporter.
 

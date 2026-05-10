@@ -10,6 +10,7 @@ import {
   type RunboardReporterOptions,
   type RunboardReportOptions,
   type RunboardResultEvidence,
+  type RunboardSourceExcerpt,
   type RunboardStats,
   type RunboardStatusDerivedErrorEvidence,
   type RunboardTestAnnotation,
@@ -26,7 +27,7 @@ import {
 
 test('exposes RunboardReporter as a class and RUNBOARD_SCHEMA_VERSION as a semver string', () => {
   expect(typeof RunboardReporter).toBe('function');
-  expect(RUNBOARD_SCHEMA_VERSION).toBe('1.0.0');
+  expect(RUNBOARD_SCHEMA_VERSION).toBe('1.1.0');
 });
 
 test('exposes the first Runboard Contract Types', () => {
@@ -60,11 +61,21 @@ test('exposes the first Runboard Contract Types', () => {
     count: 1,
     skipped: false,
   };
+  const _sourceExcerpt: RunboardSourceExcerpt = {
+    file: 'a.spec.ts',
+    startLine: 1,
+    lines: ['x;'],
+    highlightedLine: 1,
+  };
   const _statusDerivedEvidence: RunboardStatusDerivedErrorEvidence = {
     source: 'status-derived',
     message: 'm',
+    sourceExcerpt: _sourceExcerpt,
   };
-  const _testErrorEvidence: RunboardTestErrorEvidence = { source: 'test-error' };
+  const _testErrorEvidence: RunboardTestErrorEvidence = {
+    source: 'test-error',
+    sourceExcerpt: _sourceExcerpt,
+  };
   const _errorEvidence: RunboardErrorEvidence = _statusDerivedEvidence;
   // @ts-expect-error status-derived evidence requires `message`
   const _invalidStatusDerived: RunboardErrorEvidence = { source: 'status-derived' };
@@ -130,6 +141,7 @@ test('exposes the first Runboard Contract Types', () => {
     _annotation,
     _attachment,
     _step,
+    _sourceExcerpt,
     _errorEvidence,
     _resultEvidence,
     _resultSummary,
@@ -138,5 +150,5 @@ test('exposes the first Runboard Contract Types', () => {
     _case,
     _fileSummary,
     _file,
-  ]).toHaveLength(13);
+  ]).toHaveLength(14);
 });

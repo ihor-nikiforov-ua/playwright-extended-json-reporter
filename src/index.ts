@@ -8,6 +8,7 @@ export {
   type RunboardReport,
   type RunboardReportOptions,
   type RunboardResultEvidence,
+  type RunboardSourceExcerpt,
   type RunboardStats,
   type RunboardStatusDerivedErrorEvidence,
   type RunboardTestAnnotation,
