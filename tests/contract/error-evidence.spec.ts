@@ -202,6 +202,99 @@ test.describe('RunboardReporter — Structured Error Evidence', () => {
     expect(runboard.evidence[1]?.['message']).toBe('underlying failure');
   });
 
+  test('soft assertions emit per-error evidence index-aligned with result.errors[] (catalog #27)', async () => {
+    // Catalog #27 parity: `expect.soft(...)` accumulates one TestError per
+    // failed matcher on `result.errors[]`, so a single result can carry many
+    // Display Errors. The Runboard Data Contract requires
+    // `result.runboard.evidence[]` to stay index-aligned with the serialized
+    // `result.errors[]`, even when multiple soft assertions fail. A regression
+    // that collapsed the soft errors into a single generic evidence entry, or
+    // emitted them in the wrong order, would break Runboard's per-error
+    // pairing of Display Error and Structured Error Evidence.
+    const reporter = new RunboardReporter({ outputFolder });
+    const toHaveTextMessage =
+      'Error: expect(locator).toHaveText(expected) failed\n\n' +
+      "Locator:  locator('h1')\n" +
+      'Expected: "A"\n' +
+      'Received: "B"\n';
+    const toHaveCountMessage =
+      'Error: expect(locator).toHaveCount(expected) failed\n\n' +
+      "Locator:  locator('li')\n" +
+      'Expected: 2\n' +
+      'Received: 1\n';
+    const run = fakeRun({
+      rootDir: '/repo',
+      files: [
+        {
+          fileName: '/repo/tests/soft.spec.ts',
+          tests: [
+            {
+              title: 'soft assertions accumulate multiple errors per result',
+              status: 'failed',
+              expectedStatus: 'passed',
+              results: [
+                {
+                  status: 'failed',
+                  errors: [
+                    {
+                      message: toHaveTextMessage,
+                      stack: `${toHaveTextMessage}    at /repo/tests/soft.spec.ts:3:48`,
+                      location: { file: '/repo/tests/soft.spec.ts', line: 3, column: 48 },
+                    },
+                    {
+                      message: toHaveCountMessage,
+                      stack: `${toHaveCountMessage}    at /repo/tests/soft.spec.ts:4:48`,
+                      location: { file: '/repo/tests/soft.spec.ts', line: 4, column: 48 },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    reporter.onBegin?.(run.config, run.rootSuite);
+    await reporter.onEnd?.(fakeFullResult({ status: 'failed' }));
+
+    const result = await readResult();
+    const errors = result['errors'] as Array<Record<string, unknown>>;
+    const runboard = result['runboard'] as { evidence: Array<Record<string, unknown>> };
+
+    expect(errors).toHaveLength(2);
+    expect(runboard.evidence).toHaveLength(2);
+
+    // Index 0: toHaveText soft failure — Display Error and evidence both carry
+    // the matcher-specific text and same source location.
+    expect(errors[0]?.['message']).toContain('toHaveText');
+    expect(runboard.evidence[0]?.['source']).toBe('test-error');
+    expect(runboard.evidence[0]?.['message']).toContain('toHaveText');
+    expect(runboard.evidence[0]?.['location']).toEqual({
+      file: 'tests/soft.spec.ts',
+      line: 3,
+      column: 48,
+    });
+
+    // Index 1: toHaveCount soft failure — same alignment, different matcher.
+    expect(errors[1]?.['message']).toContain('toHaveCount');
+    expect(runboard.evidence[1]?.['source']).toBe('test-error');
+    expect(runboard.evidence[1]?.['message']).toContain('toHaveCount');
+    expect(runboard.evidence[1]?.['location']).toEqual({
+      file: 'tests/soft.spec.ts',
+      line: 4,
+      column: 48,
+    });
+
+    // Cross-slot leakage would mean the matcher name appears on the wrong
+    // index — pin both directions so a regression that swapped or duplicated
+    // entries fails loudly.
+    expect(errors[0]?.['message']).not.toContain('toHaveCount');
+    expect(errors[1]?.['message']).not.toContain('toHaveText');
+    expect(runboard.evidence[0]?.['message']).not.toContain('toHaveCount');
+    expect(runboard.evidence[1]?.['message']).not.toContain('toHaveText');
+  });
+
   test('evidence preserves location relative to rootDir as POSIX path', async () => {
     const reporter = new RunboardReporter({ outputFolder });
     const run = fakeRun({
