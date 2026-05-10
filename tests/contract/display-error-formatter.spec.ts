@@ -11,6 +11,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { codeFrameColumns } from '@babel/code-frame';
 import { expect, test } from '@playwright/test';
 import type { TestCase, TestResult } from '@playwright/test/reporter';
 import { formatDisplayErrors } from '../../src/display-error-formatter.js';
@@ -205,6 +206,156 @@ test.describe('Display Error Formatter — public boundary', () => {
     } finally {
       await rm(scratchRoot, { recursive: true, force: true });
     }
+  });
+
+  test('codeframe matches Playwright HTML reporter Babel output (test timeout shape)', async () => {
+    // Catalog #1 / #8 parity: Playwright's HTML reporter calls
+    // `codeFrameColumns(source + '\n//', {start}, { highlightCode: false,
+    // linesAbove: 100, linesBelow: 100, message })`. Display Error parity for
+    // timeout-style errors requires byte-identical codeframes including the
+    // trailing `\n//` source suffix and the message attached to the arrow line.
+    const scratchRoot = await mkdtemp(join(tmpdir(), 'display-error-formatter-'));
+    try {
+      const sourceFile = join(scratchRoot, 'tests/timeout.spec.ts');
+      await mkdir(dirname(sourceFile), { recursive: true });
+      const source = [
+        "import { test } from '@playwright/test';",
+        'test.beforeAll(async () => {',
+        '  await new Promise((r) => setTimeout(r, 5000));',
+        '});',
+        "test('placeholder so the failing hook surfaces in the bundle', () => {});",
+        '',
+      ].join('\n');
+      await writeFile(sourceFile, source, 'utf8');
+      const ansiRedMessage = '[31m"beforeAll" hook timeout of 50ms exceeded.[39m';
+
+      const run = fakeRun({
+        rootDir: scratchRoot,
+        files: [
+          {
+            fileName: sourceFile,
+            tests: [
+              {
+                title: 'placeholder so the failing hook surfaces in the bundle',
+                status: 'failed',
+                expectedStatus: 'passed',
+                results: [
+                  {
+                    status: 'failed',
+                    errors: [
+                      {
+                        message: ansiRedMessage,
+                        stack: `${ansiRedMessage}\n    at ${sourceFile}:2:6`,
+                        location: { file: sourceFile, line: 2, column: 6 },
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+      const { test: t, result } = pickTestAndResult(run);
+
+      const [error] = formatDisplayErrors(t, result);
+      if (!error) throw new Error('expected Display Error');
+
+      const expectedCodeframe = codeFrameColumns(
+        `${source}\n//`,
+        { start: { line: 2, column: 6 } },
+        {
+          highlightCode: false,
+          linesAbove: 100,
+          linesBelow: 100,
+          message: '"beforeAll" hook timeout of 50ms exceeded.',
+        },
+      );
+      expect(error.codeframe).toBe(expectedCodeframe);
+    } finally {
+      await rm(scratchRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('codeframe omits message when error has no message but has location', async () => {
+    // The Babel oracle uses `stripAnsi(message).split('\n')[0] || undefined` —
+    // an empty first line means `message` is omitted from `codeFrameColumns`.
+    const scratchRoot = await mkdtemp(join(tmpdir(), 'display-error-formatter-'));
+    try {
+      const sourceFile = join(scratchRoot, 'tests/no-msg.spec.ts');
+      await mkdir(dirname(sourceFile), { recursive: true });
+      const source = 'a;\nb;\nthrow new Error();\nd;\n';
+      await writeFile(sourceFile, source, 'utf8');
+
+      const run = fakeRun({
+        rootDir: scratchRoot,
+        files: [
+          {
+            fileName: sourceFile,
+            tests: [
+              {
+                title: 'fails',
+                status: 'failed',
+                expectedStatus: 'passed',
+                results: [
+                  {
+                    status: 'failed',
+                    errors: [{ location: { file: sourceFile, line: 3, column: 7 } }],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+      const { test: t, result } = pickTestAndResult(run);
+      const [error] = formatDisplayErrors(t, result);
+      if (!error) throw new Error('expected Display Error');
+
+      const expectedCodeframe = codeFrameColumns(
+        `${source}\n//`,
+        { start: { line: 3, column: 7 } },
+        { highlightCode: false, linesAbove: 100, linesBelow: 100 },
+      );
+      expect(error.codeframe).toBe(expectedCodeframe);
+    } finally {
+      await rm(scratchRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('absent error.location yields no codeframe (test timeout shape with no stack frames)', () => {
+    // Catalog #1: a Playwright test timeout's TestError carries no `location`
+    // and a stack that is just the message (no `\n    at …` frames). Playwright
+    // HTML reporter omits the codeframe in that case; the formatter must too.
+    const ansiRedMessage = '[31mTest timeout of 50ms exceeded.[39m';
+    const run = fakeRun({
+      rootDir: '/repo',
+      files: [
+        {
+          fileName: '/repo/tests/test-timeout.spec.ts',
+          tests: [
+            {
+              title: 'exceeds the configured test timeout',
+              status: 'failed',
+              expectedStatus: 'passed',
+              results: [
+                {
+                  status: 'failed',
+                  errors: [{ message: ansiRedMessage, stack: ansiRedMessage }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    const { test: t, result } = pickTestAndResult(run);
+
+    const [error] = formatDisplayErrors(t, result);
+    if (!error) throw new Error('expected Display Error');
+
+    expect(error.message).toBe(ansiRedMessage);
+    expect(error.codeframe).toBeUndefined();
   });
 
   test('status-derived entries precede TestError entries when both apply', () => {

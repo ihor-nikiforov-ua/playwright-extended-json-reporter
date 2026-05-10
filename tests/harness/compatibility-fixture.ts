@@ -239,14 +239,27 @@ export interface CatalogDisplayErrorFixtureContext {
 }
 
 /**
- * One Display Error parity mismatch, scoped to a specific Error Catalog
- * fixture, test file, per-result attempt, and per-error index inside
- * `result.errors[]`. The `path` field names the field within the Display Error
- * object that diverged (e.g. `message`, `codeframe`, or a nested object key).
+ * One Display Error parity mismatch from an Error Catalog fixture. Catalog
+ * fixtures place their distinguishing Display Error in one of two locations:
+ *  - `scope: 'result'` — per-test `result.errors[]`. The diff is scoped to a
+ *    test file, per-result attempt, and per-error index inside that result.
+ *  - `scope: 'top-level'` — top-level `report.errors[]`, which Playwright fills
+ *    via `onError(...)` for runner-level failures (e.g. global timeout). The
+ *    diff carries only the `errorIndex` position in the array; there is no
+ *    test file or per-result attempt to associate it with.
+ *
+ * The `path` field names the field within the Display Error that diverged
+ * (e.g. `message`, `codeframe`). For `top-level` scope the entries are bare
+ * strings, so `path` is always `''`.
  */
-export interface CatalogDisplayErrorDifference {
+export type CatalogDisplayErrorDifference =
+  | CatalogResultDisplayErrorDifference
+  | CatalogTopLevelDisplayErrorDifference;
+
+export interface CatalogResultDisplayErrorDifference {
   catalogId: number;
   errorType: string;
+  scope: 'result';
   testFile: string;
   testTitle: string;
   resultIndex: number;
@@ -256,16 +269,29 @@ export interface CatalogDisplayErrorDifference {
   actual: unknown;
 }
 
+export interface CatalogTopLevelDisplayErrorDifference {
+  catalogId: number;
+  errorType: string;
+  scope: 'top-level';
+  errorIndex: number;
+  path: string;
+  expected: unknown;
+  actual: unknown;
+}
+
 /**
  * Compares the Playwright HTML reporter and Runboard Reporter Display Error
- * surfaces for a Compatibility Run, restricted to `result.errors[]`. Returns
- * one entry per divergent field, enriched with the catalog ID and Error Type
- * so the failure message can name the row that needs work. Normalization is
- * the same minimal allowlist used by {@link compareCompatibility}: temp/root
- * paths, timestamps, durations, line endings, and equivalent attachment
- * paths. Every other signal — call logs, assertion diffs, codeframes, causes,
- * screenshot/text diff signals, step or hook context, and status-derived
- * messages — surfaces as a real diff.
+ * surfaces for a Compatibility Run. Covers both per-result `result.errors[]`
+ * (where most catalog rows live) and top-level `report.errors[]` (where
+ * runner-level failures like the catalog #9 Global timeout surface via
+ * `onError(...)`). Returns one entry per divergent field, enriched with the
+ * catalog ID and Error Type so the failure message can name the row that
+ * needs work, plus a `scope` discriminator that distinguishes per-result
+ * from top-level diffs. Normalization is the same minimal allowlist used by
+ * {@link compareCompatibility}: temp/root paths, timestamps, durations, line
+ * endings, and equivalent attachment paths. Every other signal — call logs,
+ * assertion diffs, codeframes, causes, screenshot/text diff signals, step or
+ * hook context, and status-derived messages — surfaces as a real diff.
  */
 export function compareCatalogDisplayErrors(
   run: CompatibilityRun,
@@ -340,6 +366,7 @@ export function compareCatalogDisplayErrors(
             out.push({
               catalogId: fixture.catalogId,
               errorType: fixture.errorType,
+              scope: 'result',
               testFile: fileName,
               testTitle,
               resultIndex: resultIdx,
@@ -353,21 +380,61 @@ export function compareCatalogDisplayErrors(
       }
     }
   }
+
+  const htmlTopLevelErrors = (run.htmlReport['errors'] as string[] | undefined) ?? [];
+  const runboardTopLevelErrors = (run.runboardReport['errors'] as string[] | undefined) ?? [];
+  const topLevelErrorCount = Math.max(htmlTopLevelErrors.length, runboardTopLevelErrors.length);
+  for (let i = 0; i < topLevelErrorCount; i++) {
+    const htmlError = htmlTopLevelErrors[i];
+    const runboardError = runboardTopLevelErrors[i];
+    const normHtml =
+      htmlError === undefined ? undefined : normalizeTopLevelError(htmlError, run.rootDir);
+    const normRunboard =
+      runboardError === undefined ? undefined : normalizeTopLevelError(runboardError, run.rootDir);
+    if (normHtml === normRunboard) continue;
+    out.push({
+      catalogId: fixture.catalogId,
+      errorType: fixture.errorType,
+      scope: 'top-level',
+      errorIndex: i,
+      path: '',
+      expected: normHtml,
+      actual: normRunboard,
+    });
+  }
+
   return out;
 }
 
+// Top-level errors live in `report.errors[]` as bare strings (Playwright HTML
+// reporter produces them via `formatError(...).message`; the Runboard Reporter
+// joins `error.stack ?? error.message ?? error.value`). Apply the same minimal
+// normalization the per-result comparator uses for stack/snippet text: strip
+// the rootDir prefix so absolute and project-relative paths collapse to the
+// same canonical form, and normalize CRLF to LF so cross-platform output is
+// equivalent.
+function normalizeTopLevelError(value: string, rootDir: string): string {
+  return normalizeRootPaths(normalizeLineEndings(value), rootDir);
+}
+
 /**
- * Renders {@link compareCatalogDisplayErrors} output as actionable text. Each
- * line names the catalog ID, Error Type, test file, per-result index, per-
- * error index, and divergent field path so an AFK agent can grep for a single
- * row, switch to the matching fixture, and run it locally.
+ * Renders {@link compareCatalogDisplayErrors} output as actionable text. For
+ * per-result diffs, each line names the catalog ID, Error Type, test file,
+ * per-result index, per-error index, and divergent field path. For top-level
+ * diffs (e.g. global timeout), the line points at `report.errors[i]` instead
+ * of a test file, so an AFK agent can grep for a single row, switch to the
+ * matching fixture, and run it locally.
  */
 export function formatCatalogDisplayErrorDifferences(
   diffs: readonly CatalogDisplayErrorDifference[],
 ): string {
   return diffs
     .map((d) => {
-      const header = `Catalog #${d.catalogId} (${d.errorType}) — ${d.testFile} > ${d.testTitle} > result[${d.resultIndex}] > errors[${d.errorIndex}]${d.path ? ` > ${d.path}` : ''}`;
+      const location =
+        d.scope === 'top-level'
+          ? `report.errors[${d.errorIndex}]`
+          : `${d.testFile} > ${d.testTitle} > result[${d.resultIndex}] > errors[${d.errorIndex}]`;
+      const header = `Catalog #${d.catalogId} (${d.errorType}) — ${location}${d.path ? ` > ${d.path}` : ''}`;
       return `${header}\n  expected: ${formatValue(d.expected)}\n  actual:   ${formatValue(d.actual)}`;
     })
     .join('\n');

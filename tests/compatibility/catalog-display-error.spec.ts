@@ -110,6 +110,7 @@ test.describe('compareCatalogDisplayErrors — structural shape', () => {
     expect(diffs[0]).toEqual({
       catalogId: 1,
       errorType: 'Test timeout',
+      scope: 'result',
       testFile: 'tests/01-test-timeout.spec.ts',
       testTitle: 'exceeds the configured test timeout',
       resultIndex: 0,
@@ -148,8 +149,11 @@ test.describe('compareCatalogDisplayErrors — structural shape', () => {
     });
     const diffs = compareCatalogDisplayErrors(run, FIXTURE);
     expect(diffs).toHaveLength(1);
-    expect(diffs[0]?.resultIndex).toBe(1);
-    expect(diffs[0]?.errorIndex).toBe(1);
+    const [diff] = diffs;
+    expect(diff?.scope).toBe('result');
+    if (diff?.scope !== 'result') throw new Error('expected per-result diff');
+    expect(diff.resultIndex).toBe(1);
+    expect(diff.errorIndex).toBe(1);
   });
 
   test('reports a missing display error (one side has fewer entries)', () => {
@@ -264,6 +268,7 @@ test.describe('formatCatalogDisplayErrorDifferences', () => {
       {
         catalogId: 8,
         errorType: 'Hook timeout',
+        scope: 'result',
         testFile: 'tests/08-hook-timeout.spec.ts',
         testTitle: 'placeholder so the failing hook surfaces in the bundle',
         resultIndex: 0,
@@ -284,5 +289,99 @@ test.describe('formatCatalogDisplayErrorDifferences', () => {
       JSON.stringify('Error in "beforeAll" hook: Hook timeout of 50ms exceeded.'),
     );
     expect(out).toContain(JSON.stringify('Hook timeout of 50ms exceeded.'));
+  });
+
+  test('renders top-level diffs against report.errors[i] instead of the per-test path', () => {
+    const out = formatCatalogDisplayErrorDifferences([
+      {
+        catalogId: 9,
+        errorType: 'Global timeout',
+        scope: 'top-level',
+        errorIndex: 0,
+        path: '',
+        expected: 'Timed out waiting 0.5s for the test to run',
+        actual: 'Timed out (legacy phrasing)',
+      },
+    ]);
+    expect(out).toContain('Catalog #9');
+    expect(out).toContain('Global timeout');
+    expect(out).toContain('report.errors[0]');
+    // Top-level diffs are not associated with a test file or per-result index.
+    expect(out).not.toContain('result[');
+    expect(out).toContain(JSON.stringify('Timed out waiting 0.5s for the test to run'));
+    expect(out).toContain(JSON.stringify('Timed out (legacy phrasing)'));
+  });
+});
+
+test.describe('compareCatalogDisplayErrors — top-level report.errors[]', () => {
+  function buildTopLevelRun(args: {
+    htmlErrors: string[];
+    runboardErrors: string[];
+    rootDir?: string;
+  }): CompatibilityRun {
+    return {
+      htmlReport: { metadata: {}, files: [], stats: {}, errors: args.htmlErrors },
+      htmlFiles: new Map(),
+      runboardReport: { metadata: {}, files: [], stats: {}, errors: args.runboardErrors },
+      runboardFiles: new Map(),
+      rootDir: args.rootDir ?? '/tmp/fixture',
+    };
+  }
+
+  const GLOBAL_TIMEOUT_FIXTURE = { catalogId: 9, errorType: 'Global timeout' };
+
+  test('returns no diffs when top-level errors match', () => {
+    const run = buildTopLevelRun({
+      htmlErrors: ['Timed out waiting 0.5s for the test to run'],
+      runboardErrors: ['Timed out waiting 0.5s for the test to run'],
+    });
+    expect(compareCatalogDisplayErrors(run, GLOBAL_TIMEOUT_FIXTURE)).toEqual([]);
+  });
+
+  test('flags a divergent top-level error with scope=top-level and errorIndex', () => {
+    const run = buildTopLevelRun({
+      htmlErrors: ['Timed out waiting 0.5s for the test to run'],
+      runboardErrors: ['Timed out (legacy phrasing)'],
+    });
+    const diffs = compareCatalogDisplayErrors(run, GLOBAL_TIMEOUT_FIXTURE);
+    expect(diffs).toHaveLength(1);
+    expect(diffs[0]).toEqual({
+      catalogId: 9,
+      errorType: 'Global timeout',
+      scope: 'top-level',
+      errorIndex: 0,
+      path: '',
+      expected: 'Timed out waiting 0.5s for the test to run',
+      actual: 'Timed out (legacy phrasing)',
+    });
+  });
+
+  test('reports a missing top-level error when one side has fewer entries', () => {
+    const run = buildTopLevelRun({
+      htmlErrors: ['first', 'second'],
+      runboardErrors: ['first'],
+    });
+    const diffs = compareCatalogDisplayErrors(run, GLOBAL_TIMEOUT_FIXTURE);
+    expect(diffs).toHaveLength(1);
+    expect(diffs[0]?.scope).toBe('top-level');
+    expect(diffs[0]?.errorIndex).toBe(1);
+    expect(diffs[0]?.expected).toBe('second');
+    expect(diffs[0]?.actual).toBeUndefined();
+  });
+
+  test('rootDir prefix occurrences inside a top-level error do not produce a diff', () => {
+    const run = buildTopLevelRun({
+      htmlErrors: ['/tmp/fixture/specs/a.spec.ts:12:5\nError boom'],
+      runboardErrors: ['specs/a.spec.ts:12:5\nError boom'],
+    });
+    expect(compareCatalogDisplayErrors(run, GLOBAL_TIMEOUT_FIXTURE)).toEqual([]);
+  });
+
+  test('Windows line endings inside a top-level error do not produce a diff', () => {
+    const run = buildTopLevelRun({
+      htmlErrors: ['line1\r\nline2'],
+      runboardErrors: ['line1\nline2'],
+    });
+    expect(compareCatalogDisplayErrors(run, GLOBAL_TIMEOUT_FIXTURE)).toEqual([]);
   });
 });
