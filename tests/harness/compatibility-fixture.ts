@@ -39,6 +39,12 @@ export interface CompatibilityRun {
   htmlAttachments?: Map<string, Buffer>;
   /** Mirror of {@link htmlAttachments} for the Runboard side. */
   runboardAttachments?: Map<string, Buffer>;
+  /**
+   * The `attachmentsBaseURL` prefix configured for both reporters, used by
+   * the comparator to match serialized attachment paths. Defaults to `data/`,
+   * matching the Playwright HTML reporter and Runboard Reporter defaults.
+   */
+  attachmentsBaseURL?: string;
 }
 
 export interface CompatibilityDifference {
@@ -56,21 +62,26 @@ const TIMESTAMP_FIELDS: ReadonlySet<string> = new Set(['startTime']);
 const DURATION_FIELDS: ReadonlySet<string> = new Set(['duration']);
 const SNIPPET_FIELDS: ReadonlySet<string> = new Set(['snippet', 'codeframe', 'stack']);
 
-const ATTACHMENT_PATH_PATTERN = /^data\/([0-9a-f]+)(\.[A-Za-z0-9_.-]+)?$/;
+const DEFAULT_ATTACHMENTS_BASE_URL = 'data/';
 
 interface NormalizeContext {
   rootDir: string;
   attachments: Map<string, Buffer> | undefined;
+  attachmentPathPattern: RegExp;
 }
 
 export function compareCompatibility(run: CompatibilityRun): CompatibilityDifference[] {
+  const baseUrl = run.attachmentsBaseURL ?? DEFAULT_ATTACHMENTS_BASE_URL;
+  const attachmentPathPattern = buildAttachmentPathPattern(baseUrl);
   const htmlContext: NormalizeContext = {
     rootDir: run.rootDir,
     attachments: run.htmlAttachments,
+    attachmentPathPattern,
   };
   const runboardContext: NormalizeContext = {
     rootDir: run.rootDir,
     attachments: run.runboardAttachments,
+    attachmentPathPattern,
   };
   const html = normalizeNode(run.htmlReport, '', htmlContext) as Record<string, unknown>;
   const runboard = normalizeNode(run.runboardReport, '', runboardContext) as Record<
@@ -119,7 +130,9 @@ function normalizeNode(value: unknown, key: string, ctx: NormalizeContext): unkn
   if (typeof value === 'string') {
     if (TIMESTAMP_FIELDS.has(key)) return TIMESTAMP_PLACEHOLDER;
     let normalized = value;
-    if (key === 'path') normalized = normalizeAttachmentPath(normalized, ctx.attachments);
+    if (key === 'path') {
+      normalized = normalizeAttachmentPath(normalized, ctx.attachments, ctx.attachmentPathPattern);
+    }
     if (SNIPPET_FIELDS.has(key)) normalized = normalizeLineEndings(normalized);
     normalized = normalizeRootPaths(normalized, ctx.rootDir);
     return normalized;
@@ -127,20 +140,34 @@ function normalizeNode(value: unknown, key: string, ctx: NormalizeContext): unkn
   return value;
 }
 
+function buildAttachmentPathPattern(baseUrl: string): RegExp {
+  const escaped = baseUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`^${escaped}([0-9a-f]+)(\\.[A-Za-z0-9_.-]+)?$`);
+}
+
+const MISSING_ASSET_SENTINEL = '<missing-asset>:';
+
 function normalizeAttachmentPath(
   value: string,
   attachments: Map<string, Buffer> | undefined,
+  pattern: RegExp,
 ): string {
-  const match = ATTACHMENT_PATH_PATTERN.exec(value);
+  const match = pattern.exec(value);
   if (!match) return value;
-  // Only normalize the hash when we can prove byte-equivalence: replace the
-  // sha with a content-derived digest of the referenced attachment bytes. If
-  // bytes are missing, leave the original sha so a real divergence still
-  // surfaces.
+  // Without a bytes map (unit tests that explicitly opt out), leave the value
+  // unchanged: the comparator can only enforce byte-equivalence when both
+  // sides of the run supply attachment bytes.
   if (!attachments) return value;
   const basename = `${match[1]}${match[2] ?? ''}`;
   const bytes = attachments.get(basename);
-  if (!bytes) return value;
+  // Playwright derives the path from sha1(bytes), so a regression that
+  // serialized the right path while skipping the asset write would naively
+  // round-trip to the same string the other side sends through unchanged.
+  // Replace missing-byte references with an explicit sentinel so a one-sided
+  // omission cannot silently agree with the other side's content-derived hash.
+  if (!bytes) {
+    return `${MISSING_ASSET_SENTINEL}${basename}`;
+  }
   const contentDigest = createHash('sha1').update(bytes).digest('hex');
   const ext = match[2] ?? '';
   return `data/${contentDigest}${ext}`;
@@ -157,6 +184,38 @@ function normalizeRootPaths(value: string, rootDir: string): string {
   // relative "x" collapse to the same canonical POSIX-relative form, even
   // when the absolute prefix is embedded inside a multi-line snippet.
   return value.replace(new RegExp(`${escaped}/`, 'g'), '');
+}
+
+/**
+ * Collects the `<sha>.<ext>` basenames referenced by every `path` field whose
+ * value matches `<attachmentsBaseURL><sha>.<ext>` inside the supplied report
+ * shards. Tests use this to make the "asset bytes must exist on both sides"
+ * invariant explicit rather than relying solely on the comparator's missing-
+ * asset sentinel.
+ */
+export function collectReferencedAttachmentBasenames(
+  files: Map<string, Record<string, unknown>>,
+  attachmentsBaseURL: string = DEFAULT_ATTACHMENTS_BASE_URL,
+): Set<string> {
+  const pattern = buildAttachmentPathPattern(attachmentsBaseURL);
+  const out = new Set<string>();
+  function walk(value: unknown): void {
+    if (Array.isArray(value)) {
+      for (const item of value) walk(item);
+      return;
+    }
+    if (!isPlainObject(value)) return;
+    for (const [key, child] of Object.entries(value)) {
+      if (key === 'path' && typeof child === 'string') {
+        const match = pattern.exec(child);
+        if (match?.[1]) out.add(`${match[1]}${match[2] ?? ''}`);
+        continue;
+      }
+      walk(child);
+    }
+  }
+  for (const file of files.values()) walk(file);
+  return out;
 }
 
 export function formatDifferences(diffs: CompatibilityDifference[]): string {
@@ -352,12 +411,19 @@ export interface RunCompatibilityFixtureOptions {
    * file names (e.g. `pass.spec.ts`); values are the file contents.
    */
   specs: Record<string, string>;
+  /**
+   * Optional override for both reporters' `attachmentsBaseURL` option. When
+   * supplied, both the Runboard Reporter and Playwright HTML reporter receive
+   * the same prefix and the resulting {@link CompatibilityRun} carries it so
+   * the comparator matches attachment paths against the configured prefix.
+   */
+  attachmentsBaseURL?: string;
 }
 
 export async function runCompatibilityFixture(
   options: RunCompatibilityFixtureOptions,
 ): Promise<CompatibilityRun> {
-  const { workDir, reporterDist, specs } = options;
+  const { workDir, reporterDist, specs, attachmentsBaseURL } = options;
   const specsDir = join(workDir, 'specs');
   const runboardOutputDir = join(workDir, 'runboard-bundle');
   const htmlOutputDir = join(workDir, 'html-bundle');
@@ -380,11 +446,13 @@ export async function runCompatibilityFixture(
   const reporterOptions = JSON.stringify({
     outputFolder: runboardOutputDir,
     noSnippets: true,
+    ...(attachmentsBaseURL !== undefined ? { attachmentsBaseURL } : {}),
   });
   const htmlOptions = JSON.stringify({
     outputFolder: htmlOutputDir,
     open: 'never',
     noSnippets: true,
+    ...(attachmentsBaseURL !== undefined ? { attachmentsBaseURL } : {}),
   });
   const configSource = [
     `import { defineConfig } from '@playwright/test';`,
@@ -408,19 +476,26 @@ export async function runCompatibilityFixture(
   // code separately. The CLI must run from the package root so the generated
   // playwright config can resolve `@playwright/test` against the installed
   // node_modules.
+  // Strip env overrides that would otherwise outrank the explicit reporter
+  // options below. Both reporters resolve options through `?? env ?? default`
+  // chains where an empty string still counts as defined, so unsetting the
+  // keys (rather than emptying them) is what restores the default fallbacks.
+  const childEnv: NodeJS.ProcessEnv = { ...process.env, FORCE_COLOR: '0' };
+  for (const key of [
+    'PLAYWRIGHT_RUNBOARD_OUTPUT_DIR',
+    'PLAYWRIGHT_RUNBOARD_ATTACHMENTS_BASE_URL',
+    'PLAYWRIGHT_HTML_OUTPUT_DIR',
+    'PLAYWRIGHT_HTML_REPORT',
+    'PLAYWRIGHT_HTML_ATTACHMENTS_BASE_URL',
+  ]) {
+    delete childEnv[key];
+  }
+  childEnv['PLAYWRIGHT_HTML_OPEN'] = 'never';
+
   execFileSync(playwrightBin, ['test', '--config', configPath], {
     cwd: pkgRoot,
     stdio: 'pipe',
-    env: {
-      ...process.env,
-      FORCE_COLOR: '0',
-      // Prevent the Runboard Reporter and Playwright HTML reporter from
-      // resolving outputs relative to a stale env override during the test.
-      PLAYWRIGHT_RUNBOARD_OUTPUT_DIR: '',
-      PLAYWRIGHT_HTML_OUTPUT_DIR: '',
-      PLAYWRIGHT_HTML_REPORT: '',
-      PLAYWRIGHT_HTML_OPEN: 'never',
-    },
+    env: childEnv,
   });
 
   const runboardReport = JSON.parse(
@@ -441,6 +516,7 @@ export async function runCompatibilityFixture(
     runboardFiles,
     runboardAttachments,
     rootDir: specsDir,
+    ...(attachmentsBaseURL !== undefined ? { attachmentsBaseURL } : {}),
   };
 }
 
