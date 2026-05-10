@@ -39,6 +39,7 @@ export default tseslint.config(
       'coverage/**',
       'playwright-report/**',
       '.runboard-int-*/**',
+      '.runboard-compat-*/**',
       '*.tgz',
     ],
   },

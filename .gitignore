@@ -5,6 +5,7 @@ playwright-report/
 playwright-runboard-report/
 test-results/
 .runboard-int-*/
+.runboard-compat-*/
 *.log
 *.tgz
 .DS_Store

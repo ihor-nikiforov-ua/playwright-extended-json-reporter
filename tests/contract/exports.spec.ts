@@ -58,6 +58,7 @@ test('exposes the first Runboard Contract Types', () => {
     steps: [],
     attachments: [],
     count: 1,
+    skipped: false,
   };
   const _statusDerivedEvidence: RunboardStatusDerivedErrorEvidence = {
     source: 'status-derived',
