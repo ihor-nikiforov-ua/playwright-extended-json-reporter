@@ -1539,4 +1539,253 @@ test.describe('Display Error Formatter — public boundary', () => {
       await rm(scratchRoot, { recursive: true, force: true });
     }
   });
+
+  test('closed-target action preserves API-prefixed headline, snippet, and stack tail (catalog #41)', () => {
+    // Catalog #41 parity: when an action runs against a page/context/browser
+    // that has been closed, Playwright's dispatcher rewrites the error to
+    // `<api>: Target page, context or browser has been closed` (see
+    // playwright-core `TargetClosedError`). The TestError that reaches the
+    // reporter carries the API-prefixed headline as `error.message`, a Babel
+    // codeframe at the failing call site as `error.snippet`, and a stack whose
+    // message portion is the same headline followed by the first `    at `
+    // frame. The Display Error must keep the API prefix, the closed-target
+    // wording, the snippet, and the stack frame intact in
+    // `result.errors[].message` so Runboard can surface what action ran
+    // against the closed target and where in the test it ran.
+    const headline = 'Error: locator.click: Target page, context or browser has been closed';
+    const sourceFile = '/repo/tests/closed-target.spec.ts';
+    const snippet = [
+      `  1 | import { test } from '@playwright/test';`,
+      `  2 | test('a closed page rejects further actions', async ({ page }) => {`,
+      `  3 |   await page.setContent('<html><body><button id="b">Hi</button></body></html>');`,
+      `  4 |   await page.close();`,
+      `> 5 |   await page.locator('#b').click();`,
+      `    |                            ^`,
+      `  6 | });`,
+      `  7 |`,
+    ].join('\n');
+    const frame = `    at ${sourceFile}:5:28`;
+    const stack = `${headline}\n${frame}`;
+
+    const run = fakeRun({
+      rootDir: '/repo',
+      files: [
+        {
+          fileName: sourceFile,
+          tests: [
+            {
+              title: 'a closed page rejects further actions',
+              status: 'failed',
+              expectedStatus: 'passed',
+              results: [{ status: 'failed', errors: [{ message: headline, stack, snippet }] }],
+            },
+          ],
+        },
+      ],
+    });
+    const { test: t, result } = pickTestAndResult(run);
+
+    const [error] = formatDisplayErrors(t, result);
+    if (!error) throw new Error('expected Display Error for catalog #41');
+
+    expect(error.message).toContain(headline);
+    expect(error.message).toContain('Target page, context or browser has been closed');
+    expect(error.message).toContain(`> 5 |   await page.locator('#b').click();`);
+    expect(error.message).toContain(frame);
+    // Headline appears exactly once — a regression that re-emitted the
+    // pre-frame portion of the stack as stack tail would render the
+    // closed-target line twice.
+    expect(error.message.split(headline).length - 1).toBe(1);
+  });
+
+  test('navigation network error preserves API prefix, net::ERR_ wording, URL, Call log, snippet, and stack tail (catalog #42)', () => {
+    // Catalog #42 parity: chromium navigation failures arrive as
+    // `page.goto: net::ERR_<reason> at <url>` with a Call log block recording
+    // the navigation attempt. The Call log lines are wrapped in dim ANSI
+    // escapes (`[2m...[22m`) by Playwright before the reporter
+    // sees them, so the formatter must preserve those escapes verbatim. The
+    // multi-line message + Call log embeds at the head of `error.stack`
+    // before the first `    at ` frame; the parseErrorStack partition keeps
+    // both the headline and the Call log intact exactly once in
+    // `result.errors[].message` rather than re-emitting them as stack tail
+    // (which would render the navigation URL and `net::ERR_*` wording
+    // twice).
+    const navigateLine =
+      '[2m  - navigating to "http://127.0.0.1:1/dashboard", waiting until "load"[22m';
+    const messageBody = [
+      'Error: page.goto: net::ERR_UNSAFE_PORT at http://127.0.0.1:1/dashboard',
+      'Call log:',
+      navigateLine,
+      '',
+    ].join('\n');
+    const sourceFile = '/repo/tests/network-error.spec.ts';
+    const snippet = [
+      `  1 | import { test } from '@playwright/test';`,
+      `  2 | test('navigation surfaces a chromium net error', async ({ page }) => {`,
+      `> 3 |   await page.goto('http://127.0.0.1:1/dashboard');`,
+      `    |              ^`,
+      `  4 | });`,
+      `  5 |`,
+    ].join('\n');
+    const frame = `    at ${sourceFile}:3:14`;
+    const stack = `${messageBody}\n${frame}`;
+
+    const run = fakeRun({
+      rootDir: '/repo',
+      files: [
+        {
+          fileName: sourceFile,
+          tests: [
+            {
+              title: 'navigation surfaces a chromium net error',
+              status: 'failed',
+              expectedStatus: 'passed',
+              results: [{ status: 'failed', errors: [{ message: messageBody, stack, snippet }] }],
+            },
+          ],
+        },
+      ],
+    });
+    const { test: t, result } = pickTestAndResult(run);
+
+    const [error] = formatDisplayErrors(t, result);
+    if (!error) throw new Error('expected Display Error for catalog #42');
+
+    expect(error.message).toContain('page.goto:');
+    expect(error.message).toContain('net::ERR_UNSAFE_PORT');
+    expect(error.message).toContain('http://127.0.0.1:1/dashboard');
+    expect(error.message).toContain('Call log:');
+    // ANSI dim escapes around the Call log line survive verbatim — the
+    // human-facing Display Error keeps the colors Playwright pre-rendered.
+    expect(error.message).toContain(navigateLine);
+    expect(error.message).toContain(`> 3 |   await page.goto('http://127.0.0.1:1/dashboard');`);
+    expect(error.message).toContain(frame);
+    // Each piece of the multi-line message appears exactly once — a
+    // regression that re-emitted the pre-frame portion of the stack as
+    // stack tail would double the headline and the Call log.
+    expect(error.message.split('Call log:').length - 1).toBe(1);
+    expect(error.message.split('net::ERR_UNSAFE_PORT').length - 1).toBe(1);
+    expect(error.message.split(navigateLine).length - 1).toBe(1);
+  });
+
+  test('page-crashed action preserves API prefix, Target crashed wording, Call log, snippet, and stack tail (catalog #43)', () => {
+    // Catalog #43 parity: after a `page.crash` event fires (e.g. navigation
+    // to chrome://crash), the next page-bound API call rejects with
+    // `<api>: Target crashed <browserLogMessage>` where the browser log is
+    // typically empty for chromium — leaving the trailing space after
+    // `Target crashed` that the Error Catalog distinguishing signal pins.
+    // Playwright also attaches a Call log (with dim ANSI escapes) recording
+    // the action that raced the crash. The formatter must preserve the
+    // trailing space, the API prefix, the `Target crashed` wording, and the
+    // Call log block intact in `result.errors[].message` — a regression that
+    // trimmed the trailing space or stripped the ANSI would diverge from
+    // Playwright's HTML reporter for this row.
+    const callLogLine = `[2m    - checking visibility of locator('body')[22m`;
+    const messageBody = [
+      'Error: locator.isVisible: Target crashed ',
+      'Call log:',
+      callLogLine,
+      '',
+    ].join('\n');
+    const sourceFile = '/repo/tests/page-crashed.spec.ts';
+    const snippet = [
+      `  5 |   page.goto('chrome://crash').catch(() => {});`,
+      `  6 |   await crashed;`,
+      `> 7 |   await page.locator('body').isVisible();`,
+      `    |                              ^`,
+      `  8 | });`,
+      `  9 |`,
+    ].join('\n');
+    const frame = `    at ${sourceFile}:7:30`;
+    const stack = `${messageBody}\n${frame}`;
+
+    const run = fakeRun({
+      rootDir: '/repo',
+      files: [
+        {
+          fileName: sourceFile,
+          tests: [
+            {
+              title: 'page crashed when navigating to chrome://crash',
+              status: 'failed',
+              expectedStatus: 'passed',
+              results: [{ status: 'failed', errors: [{ message: messageBody, stack, snippet }] }],
+            },
+          ],
+        },
+      ],
+    });
+    const { test: t, result } = pickTestAndResult(run);
+
+    const [error] = formatDisplayErrors(t, result);
+    if (!error) throw new Error('expected Display Error for catalog #43');
+
+    expect(error.message).toContain('locator.isVisible:');
+    // The trailing space after `Target crashed` is the artifact of
+    // `'Target crashed ' + e.browserLogMessage()` with an empty browser log.
+    // It is preserved verbatim so the Display Error matches Playwright.
+    expect(error.message).toContain('Target crashed ');
+    expect(error.message).toContain('Call log:');
+    expect(error.message).toContain(callLogLine);
+    expect(error.message).toContain(`> 7 |   await page.locator('body').isVisible();`);
+    expect(error.message).toContain(frame);
+    expect(error.message.split('Target crashed ').length - 1).toBe(1);
+    expect(error.message.split('Call log:').length - 1).toBe(1);
+    expect(error.message.split(callLogLine).length - 1).toBe(1);
+  });
+
+  test('unhandled in-page exception preserves user throw headline, snippet, and stack tail (catalog #44)', () => {
+    // Catalog #44 parity: the test body listens for `pageerror`, observes the
+    // in-page exception, and rethrows a `Synthetic crash from /crashy: ...`
+    // Error so the failure reaches `result.errors[]`. Unlike #41–#43, there
+    // is no Playwright API prefix and no Call log — the failure is a plain
+    // user-thrown Error. The formatter must therefore emit the user's
+    // headline, the snippet at the throw site, and the single throw-frame
+    // stack tail without inventing API prefixes or Call log structure.
+    const headline = 'Error: Synthetic crash from /crashy: ReferenceError: x is not defined';
+    const sourceFile = '/repo/tests/page-error.spec.ts';
+    const snippet = [
+      `  4 |   await page.goto('data:text/html,<script>setTimeout(() => { throw new Error("ReferenceError: x is not defined"); }, 0);</script>');`,
+      `  5 |   const error = await pageError;`,
+      `> 6 |   throw new Error('Synthetic crash from /crashy: ' + error.message);`,
+      `    |         ^`,
+      `  7 | });`,
+      `  8 |`,
+    ].join('\n');
+    const frame = `    at ${sourceFile}:6:9`;
+    const stack = `${headline}\n${frame}`;
+
+    const run = fakeRun({
+      rootDir: '/repo',
+      files: [
+        {
+          fileName: sourceFile,
+          tests: [
+            {
+              title: 'page error listener surfaces an unhandled in-page exception',
+              status: 'failed',
+              expectedStatus: 'passed',
+              results: [{ status: 'failed', errors: [{ message: headline, stack, snippet }] }],
+            },
+          ],
+        },
+      ],
+    });
+    const { test: t, result } = pickTestAndResult(run);
+
+    const [error] = formatDisplayErrors(t, result);
+    if (!error) throw new Error('expected Display Error for catalog #44');
+
+    expect(error.message).toContain(headline);
+    expect(error.message).toContain('Synthetic crash from /crashy');
+    expect(error.message).toContain(
+      `> 6 |   throw new Error('Synthetic crash from /crashy: ' + error.message);`,
+    );
+    expect(error.message).toContain(frame);
+    // No Playwright API prefix or Call log structure should be invented —
+    // the underlying error is a plain user `throw`.
+    expect(error.message).not.toContain('Call log:');
+    // Headline appears exactly once.
+    expect(error.message.split(headline).length - 1).toBe(1);
+  });
 });
