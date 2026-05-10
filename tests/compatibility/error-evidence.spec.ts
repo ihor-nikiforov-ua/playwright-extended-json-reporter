@@ -92,6 +92,57 @@ test.describe('Compatibility Fixture — Structured Error Evidence', () => {
     expect(primary).not.toHaveProperty('errorType');
   });
 
+  test('failing nested test.step records stepPath, stepCategory, and attachmentIndexes', async () => {
+    // Real-Playwright regression guard: the public reporter API serializes
+    // step.error and the matching result.errors[] entry as separate TestError
+    // objects, so a reference-keyed linkage drops stepPath/stepCategory/
+    // attachmentIndexes entirely when the run leaves the worker. This fixture
+    // boots a real Playwright process that fails inside a nested test.step
+    // after attaching a screenshot so structural linkage is exercised
+    // end-to-end against the published reporter dist.
+    const run = await runCompatibilityFixture({
+      workDir,
+      reporterDist,
+      expectFailingSuite: true,
+      specs: {
+        'nested-step-failure.spec.ts': [
+          `import { expect, test } from '@playwright/test';`,
+          `test('inner step fails after attachment', async ({}, testInfo) => {`,
+          `  await test.step('outer step', async () => {`,
+          `    await test.step('inner step', async () => {`,
+          `      await testInfo.attach('shot', { body: Buffer.from([1, 2, 3]), contentType: 'image/png' });`,
+          `      expect(1 + 1).toBe(3);`,
+          `    });`,
+          `  });`,
+          `});`,
+          '',
+        ].join('\n'),
+      },
+    });
+
+    const result = firstResult(run);
+    expect(result.runboard).toBeDefined();
+    const evidence = result.runboard?.evidence ?? [];
+    expect(evidence.length).toBeGreaterThanOrEqual(1);
+    const [primary] = evidence;
+    expect(primary?.['source']).toBe('test-error');
+    // Real-Playwright structural-linkage assertions. Playwright propagates
+    // `step.error` up every parent test.step on the failing call stack, so
+    // the structural matcher resolves the deepest matching step (the
+    // `expect`-category leaf) for stepPath/stepCategory and unions
+    // attachments across the chain — the testInfo.attach() lives on a
+    // sibling `test.attach` step under the inner test.step, so a strict
+    // per-step lookup would drop attachmentIndexes entirely.
+    const stepPath = primary?.['stepPath'] as string[] | undefined;
+    expect(stepPath?.[0]).toBe('outer step');
+    expect(stepPath?.[1]).toBe('inner step');
+    expect(stepPath?.length ?? 0).toBeGreaterThanOrEqual(3);
+    expect(primary?.['stepCategory']).toBe('expect');
+    const attachmentIndexes = primary?.['attachmentIndexes'] as number[] | undefined;
+    expect(Array.isArray(attachmentIndexes)).toBe(true);
+    expect(attachmentIndexes?.length).toBeGreaterThanOrEqual(1);
+  });
+
   test('test.fail() unexpectedly passing emits a status-derived evidence entry', async () => {
     const run = await runCompatibilityFixture({
       workDir,

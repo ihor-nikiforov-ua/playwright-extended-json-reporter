@@ -345,6 +345,120 @@ test.describe('RunboardReporter — Structured Error Evidence', () => {
     expect(evidence?.['attachmentIndexes']).toEqual([0]);
   });
 
+  test('step linkage matches structurally even when step.error and result.errors[] are distinct objects', async () => {
+    // Real Playwright serializes step.error and result.errors[] across the
+    // worker-to-main IPC boundary as separate TestError objects with the same
+    // content. This regression test pins linkage to a stable structural match
+    // so the reporter does not silently drop stepPath/stepCategory/
+    // attachmentIndexes when reference identity is gone.
+    const reporter = new RunboardReporter({ outputFolder });
+    const screenshot = { name: 'screenshot', contentType: 'image/png', path: '/tmp/cap.png' };
+    const errorContent = {
+      message: 'expect(received).toBe(expected)',
+      stack: 'Error: expect(received).toBe(expected)\n    at click.spec.ts:5:1',
+      location: { file: '/repo/tests/click.spec.ts', line: 5, column: 1 },
+    };
+    const run = fakeRun({
+      rootDir: '/repo',
+      files: [
+        {
+          fileName: '/repo/tests/click.spec.ts',
+          tests: [
+            {
+              title: 'fails inside step (distinct objects)',
+              status: 'failed',
+              expectedStatus: 'passed',
+              results: [
+                {
+                  status: 'failed',
+                  attachments: [screenshot],
+                  errors: [{ ...errorContent, location: { ...errorContent.location } }],
+                  steps: [
+                    {
+                      title: 'outer',
+                      category: 'test.step',
+                      steps: [
+                        {
+                          title: 'inner click',
+                          category: 'pw:api',
+                          attachments: [screenshot],
+                          error: { ...errorContent, location: { ...errorContent.location } },
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    reporter.onBegin?.(run.config, run.rootSuite);
+    await reporter.onEnd?.(fakeFullResult({ status: 'failed' }));
+
+    const result = await readResult();
+    const runboard = result['runboard'] as { evidence: Array<Record<string, unknown>> };
+    const [evidence] = runboard.evidence;
+    expect(evidence?.['stepPath']).toEqual(['outer', 'inner click']);
+    expect(evidence?.['stepCategory']).toBe('pw:api');
+    expect(evidence?.['attachmentIndexes']).toEqual([0]);
+  });
+
+  test('duplicate structurally-equal errors each consume their own step linkage in order', async () => {
+    // Two failing steps that record the same logical error must each get
+    // their own linkage entry in result.errors[] order, not collapse into a
+    // single shared linkage.
+    const reporter = new RunboardReporter({ outputFolder });
+    const errorContent = {
+      message: 'flaky timeout',
+      stack: 'Error: flaky timeout\n    at flaky.spec.ts:7:1',
+    };
+    const run = fakeRun({
+      rootDir: '/repo',
+      files: [
+        {
+          fileName: '/repo/tests/flaky.spec.ts',
+          tests: [
+            {
+              title: 'two distinct steps fail with the same content',
+              status: 'failed',
+              expectedStatus: 'passed',
+              results: [
+                {
+                  status: 'failed',
+                  errors: [{ ...errorContent }, { ...errorContent }],
+                  steps: [
+                    {
+                      title: 'first step',
+                      category: 'test.step',
+                      error: { ...errorContent },
+                    },
+                    {
+                      title: 'second step',
+                      category: 'test.step',
+                      error: { ...errorContent },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    reporter.onBegin?.(run.config, run.rootSuite);
+    await reporter.onEnd?.(fakeFullResult({ status: 'failed' }));
+
+    const result = await readResult();
+    const runboard = result['runboard'] as { evidence: Array<Record<string, unknown>> };
+    expect(runboard.evidence).toHaveLength(2);
+    expect(runboard.evidence[0]?.['stepPath']).toEqual(['first step']);
+    expect(runboard.evidence[1]?.['stepPath']).toEqual(['second step']);
+  });
+
   test('evidence omits step linkage fields when error is not associated with a step', async () => {
     const reporter = new RunboardReporter({ outputFolder });
     const run = fakeRun({

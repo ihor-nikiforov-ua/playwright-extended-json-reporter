@@ -247,10 +247,6 @@ function deriveOutcome(
 }
 
 function createResult(spec: FakeTestResultSpec, retry: number): TestResult {
-  // Preserve TestError reference identity from spec to runtime so a step that
-  // shares its `error` with `result.errors[]` mirrors real Playwright (where
-  // both fields point at the same object) and downstream linkage by reference
-  // works in tests without content-equality fallbacks.
   return {
     annotations: (spec.annotations ?? []).map((a) => ({ ...a })),
     attachments: (spec.attachments ?? []) as TestResult['attachments'],
