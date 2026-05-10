@@ -186,8 +186,24 @@ const EXPECTED_PARITY_FAILURES: ReadonlySet<number> = new Set<number>([
   // tests/contract/display-error-formatter.spec.ts pin both shapes so a
   // future change cannot drop the snippet, collapse the test.step
   // boundary frame into the throw frame, or synthesize a fake stepPath
-  // for the body-level marker.
-  41, 42, 43, 44,
+  // for the body-level marker. Issue #45 dropped catalog IDs 41, 42, 43,
+  // 44 (page/target/context closed, network error during navigation,
+  // page crashed, unhandled exception in page). All four miscellaneous
+  // browser/runtime shapes arrive as a single TestError on
+  // `result.errors[]` whose `error.message` is a Playwright API-prefixed
+  // headline (`locator.click: Target page, context or browser has been
+  // closed`, `page.goto: net::ERR_<reason> at <url>`, `locator.<call>:
+  // Target crashed `, or a plain user `throw new Error(...)`), whose
+  // `error.snippet` is the Babel codeframe at the failing call site, and
+  // whose `error.stack` embeds the message portion (with any Call log
+  // lines) before the first `    at ` frame. The same `parseErrorStack`
+  // partition the action/wait timeout rows use keeps the headline, Call
+  // log, snippet, and stack frame intact in `result.errors[].message`,
+  // so no formatter changes were needed; contract regression tests in
+  // tests/contract/display-error-formatter.spec.ts pin each shape so a
+  // future change cannot drop the snippet, duplicate the Call log, or
+  // strip the `net::ERR_` / `Target crashed` / closed-target wording
+  // from the headline.
 ]);
 
 test.describe('Error Catalog — Display Error parity', () => {
