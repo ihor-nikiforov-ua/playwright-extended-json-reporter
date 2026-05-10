@@ -771,6 +771,79 @@ test.describe('Display Error Formatter — public boundary', () => {
     expect(error.message.split('Received: unchecked').length - 1).toBe(1);
   });
 
+  test('toHaveScreenshot preserves matcher hint, pixel-diff text, Snapshot line, and Call log (catalog #26)', () => {
+    // Catalog #26 parity: `toHaveScreenshot` failures ride a different shape
+    // than the other web-first matchers. There is no Locator/Expected/Received
+    // block (the matcher targets a Page, not a Locator, and the Expected and
+    // Received values are images, not printable strings). Instead, the
+    // `formatMatcherMessage` header is followed by an indented pixel-diff line
+    // produced by the image comparator (e.g. "X pixels (ratio Y of all image
+    // pixels) are different."), then a blank line, then a `  Snapshot: <name>`
+    // line, and finally the Call log. The full multi-line content is embedded
+    // in `error.message` and again at the head of `error.stack` before the
+    // first `    at ` frame; the parseErrorStack partition keeps every line
+    // intact in the Display Error message instead of duplicating any of them
+    // into the stack tail. Screenshot diff/expected/actual attachments stay on
+    // the test result alongside the Display Error and remain available through
+    // the existing data-bundle attachment model — this contract test only pins
+    // the human-facing message wording the formatter is responsible for.
+    const message = [
+      'Error: expect(page).toHaveScreenshot(expected) failed',
+      '',
+      'Timeout:  1000ms',
+      '  3 pixels (ratio 0.01 of all image pixels) are different.',
+      '',
+      '  Snapshot: baseline.png',
+      '',
+      'Call log:',
+      '  - Expect "toHaveScreenshot" with timeout 1000ms',
+      '    - taking page screenshot',
+      '      - waiting for fonts to load...',
+      '      - fonts loaded',
+      '    - 3 pixels (ratio 0.01 of all image pixels) are different.',
+      '',
+    ].join('\n');
+    const stack = `${message}\n    at /repo/tests/to-have-screenshot.spec.ts:6:30`;
+    const run = fakeRun({
+      rootDir: '/repo',
+      files: [
+        {
+          fileName: '/repo/tests/to-have-screenshot.spec.ts',
+          tests: [
+            {
+              title: 'toHaveScreenshot fails because the baseline differs',
+              status: 'failed',
+              expectedStatus: 'passed',
+              results: [{ status: 'failed', errors: [{ message, stack }] }],
+            },
+          ],
+        },
+      ],
+    });
+    const { test: t, result } = pickTestAndResult(run);
+
+    const [error] = formatDisplayErrors(t, result);
+    if (!error) throw new Error('expected Display Error');
+
+    expect(error.message).toContain('expect(page).toHaveScreenshot(expected) failed');
+    expect(error.message).toContain('Timeout:  1000ms');
+    expect(error.message).toContain('3 pixels (ratio 0.01 of all image pixels) are different.');
+    expect(error.message).toContain('  Snapshot: baseline.png');
+    expect(error.message).toContain('Call log:');
+    expect(error.message).toContain('  - Expect "toHaveScreenshot" with timeout 1000ms');
+    expect(error.message).toContain('    at /repo/tests/to-have-screenshot.spec.ts:6:30');
+    // The pixel-diff text appears in the matcher block AND in the Call log
+    // (Playwright records the comparator output in both places). Each
+    // occurrence in the original message must round-trip exactly once — a
+    // regression that re-emitted the pre-frame content as stack tail would
+    // double both copies.
+    expect(error.message.split('Call log:').length - 1).toBe(1);
+    expect(error.message.split('  Snapshot: baseline.png').length - 1).toBe(1);
+    expect(
+      error.message.split('3 pixels (ratio 0.01 of all image pixels) are different.').length - 1,
+    ).toBe(2);
+  });
+
   test('disposed-context error preserves headline and stack tail (catalog #17)', () => {
     // Catalog #17 parity: disposed-context errors ("Execution context was
     // destroyed", "JSHandle is disposed", "Frame was detached") arrive as a
