@@ -10,10 +10,10 @@ import type {
   RunboardTestCaseSummary,
   RunboardTestErrorEvidence,
   RunboardTestResult,
-  RunboardTestResultDisplayError,
   RunboardTestResultSummary,
   RunboardTestStep,
 } from './contract.js';
+import { formatDisplayErrors } from './display-error-formatter.js';
 
 export interface SerializeContext {
   projectName: string;
@@ -341,53 +341,6 @@ function formatEvidenceEntries(
   return out;
 }
 
-function formatDisplayErrors(test: TestCase, result: TestResult): RunboardTestResultDisplayError[] {
-  const out: RunboardTestResultDisplayError[] = [];
-  if (result.status === 'passed' && test.expectedStatus === 'failed') {
-    out.push({ message: 'Expected to fail, but passed.' });
-  }
-  if (result.status === 'interrupted') {
-    out.push({ message: 'Test was interrupted.' });
-  }
-  for (const error of result.errors ?? []) {
-    out.push(serializeDisplayError(error));
-  }
-  return out;
-}
-
-function serializeDisplayError(error: TestError): RunboardTestResultDisplayError {
-  const tokens: string[] = [];
-  const baseMessage = error.message ?? error.value ?? '';
-  tokens.push(baseMessage);
-  if (error.snippet !== undefined && error.snippet !== '') {
-    tokens.push('');
-    tokens.push(error.snippet);
-  }
-  if (error.stack !== undefined && error.stack !== '') {
-    const stackLines = stripMessageLineFromStack(error.stack, baseMessage);
-    if (stackLines.length > 0) tokens.push(stackLines.join('\n'));
-  }
-  if (error.cause) {
-    const cause = serializeDisplayError(error.cause);
-    tokens.push(`[cause]: ${cause.message}`);
-  }
-  const out: RunboardTestResultDisplayError = { message: tokens.join('\n') };
-  const codeframe = error.location
-    ? readSourceCodeframe(error.location.file, error.location.line, error.location.column)
-    : undefined;
-  if (codeframe !== undefined) out.codeframe = codeframe;
-  return out;
-}
-
-function stripMessageLineFromStack(stack: string, message: string): string[] {
-  const lines = stack.split('\n');
-  const firstMessageLine = message.split('\n')[0];
-  if (firstMessageLine && lines[0]?.includes(firstMessageLine)) {
-    return lines.slice(1);
-  }
-  return lines;
-}
-
 interface NormalizedAttachment {
   name: string;
   contentType: string;
@@ -572,10 +525,6 @@ function stripAnsiEscapes(value: string): string {
 
 function readSourceSnippet(file: string, line: number, column: number): string | undefined {
   return makeCodeFrame(file, line, column, { linesAbove: 2, linesBelow: 2 });
-}
-
-function readSourceCodeframe(file: string, line: number, column: number): string | undefined {
-  return makeCodeFrame(file, line, column, { linesAbove: 5, linesBelow: 5 });
 }
 
 function makeCodeFrame(
