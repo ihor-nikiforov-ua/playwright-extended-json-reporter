@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
@@ -85,7 +85,7 @@ test.describe('RunboardReporter — Producer Contract', () => {
     expect(report.machines).toEqual([]);
   });
 
-  test('report.options is empty until reporter options are wired up', async () => {
+  test('report.options is empty when no display options are provided', async () => {
     const reporter = new RunboardReporter({ outputFolder });
     const run = fakeRun({ rootDir: '/repo' });
 
@@ -94,6 +94,155 @@ test.describe('RunboardReporter — Producer Contract', () => {
 
     const report = JSON.parse(await readFile(join(outputFolder, 'report.json'), 'utf8'));
     expect(report.options).toEqual({});
+  });
+
+  test('serializes title, noCopyPrompt, and noSnippets into report.options', async () => {
+    const reporter = new RunboardReporter({
+      outputFolder,
+      title: 'Nightly Smoke',
+      noCopyPrompt: true,
+      noSnippets: true,
+    });
+    const run = fakeRun({ rootDir: '/repo' });
+
+    reporter.onBegin?.(run.config, run.rootSuite);
+    await reporter.onEnd?.(fakeFullResult({ status: 'passed' }));
+
+    const report = JSON.parse(await readFile(join(outputFolder, 'report.json'), 'utf8'));
+    expect(report.options).toEqual({
+      title: 'Nightly Smoke',
+      noCopyPrompt: true,
+      noSnippets: true,
+    });
+  });
+
+  test('omits unset display options from report.options instead of writing undefined', async () => {
+    const reporter = new RunboardReporter({ outputFolder, title: 'Only Title' });
+    const run = fakeRun({ rootDir: '/repo' });
+
+    reporter.onBegin?.(run.config, run.rootSuite);
+    await reporter.onEnd?.(fakeFullResult({ status: 'passed' }));
+
+    const report = JSON.parse(await readFile(join(outputFolder, 'report.json'), 'utf8'));
+    expect(report.options).toEqual({ title: 'Only Title' });
+    expect(report.options).not.toHaveProperty('noCopyPrompt');
+    expect(report.options).not.toHaveProperty('noSnippets');
+  });
+
+  test('does not include attachmentsBaseURL in report.options', async () => {
+    const reporter = new RunboardReporter({
+      outputFolder,
+      title: 'with attachments base',
+      attachmentsBaseURL: 'https://cdn.example/runboard/',
+    });
+    const run = fakeRun({ rootDir: '/repo' });
+
+    reporter.onBegin?.(run.config, run.rootSuite);
+    await reporter.onEnd?.(fakeFullResult({ status: 'passed' }));
+
+    const report = JSON.parse(await readFile(join(outputFolder, 'report.json'), 'utf8'));
+    expect(report.options).not.toHaveProperty('attachmentsBaseURL');
+    expect(report.options).toEqual({ title: 'with attachments base' });
+  });
+
+  test('does not include no-op compatibility options in report.options', async () => {
+    const warn = console.warn;
+    console.warn = () => {};
+    try {
+      const reporter = new RunboardReporter({
+        outputFolder,
+        title: 'no-op only',
+        open: 'always',
+        host: '127.0.0.1',
+        port: 9323,
+        doNotInlineAssets: true,
+      });
+      const run = fakeRun({ rootDir: '/repo' });
+
+      reporter.onBegin?.(run.config, run.rootSuite);
+      await reporter.onEnd?.(fakeFullResult({ status: 'passed' }));
+
+      const report = JSON.parse(await readFile(join(outputFolder, 'report.json'), 'utf8'));
+      expect(report.options).toEqual({ title: 'no-op only' });
+      expect(report.options).not.toHaveProperty('open');
+      expect(report.options).not.toHaveProperty('host');
+      expect(report.options).not.toHaveProperty('port');
+      expect(report.options).not.toHaveProperty('doNotInlineAssets');
+    } finally {
+      console.warn = warn;
+    }
+  });
+
+  test('warns once via console.warn for each supplied no-op compatibility option during onBegin', async () => {
+    const warnCalls: unknown[][] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warnCalls.push(args);
+    };
+    try {
+      const reporter = new RunboardReporter({
+        outputFolder,
+        open: 'always',
+        host: '127.0.0.1',
+        port: 9323,
+        doNotInlineAssets: true,
+      });
+      const run = fakeRun({ rootDir: '/repo' });
+
+      reporter.onBegin?.(run.config, run.rootSuite);
+      await reporter.onEnd?.(fakeFullResult({ status: 'passed' }));
+
+      expect(warnCalls).toHaveLength(4);
+      const messages = warnCalls.map((args) => String(args[0]));
+      for (const message of messages) {
+        expect(message).toMatch(/^playwright-runboard-reporter:/);
+      }
+      expect(messages.some((m) => m.includes("'open'"))).toBe(true);
+      expect(messages.some((m) => m.includes("'host'"))).toBe(true);
+      expect(messages.some((m) => m.includes("'port'"))).toBe(true);
+      expect(messages.some((m) => m.includes("'doNotInlineAssets'"))).toBe(true);
+    } finally {
+      console.warn = originalWarn;
+    }
+  });
+
+  test('does not warn when no no-op compatibility option is supplied', async () => {
+    const warnCalls: unknown[][] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warnCalls.push(args);
+    };
+    try {
+      const reporter = new RunboardReporter({ outputFolder, title: 'silent run' });
+      const run = fakeRun({ rootDir: '/repo' });
+
+      reporter.onBegin?.(run.config, run.rootSuite);
+      await reporter.onEnd?.(fakeFullResult({ status: 'passed' }));
+
+      expect(warnCalls).toEqual([]);
+    } finally {
+      console.warn = originalWarn;
+    }
+  });
+
+  test('warns at most once per supplied no-op option even if onBegin runs multiple times', async () => {
+    const warnCalls: unknown[][] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warnCalls.push(args);
+    };
+    try {
+      const reporter = new RunboardReporter({ outputFolder, open: 'always', port: 9323 });
+      const run = fakeRun({ rootDir: '/repo' });
+
+      reporter.onBegin?.(run.config, run.rootSuite);
+      reporter.onBegin?.(run.config, run.rootSuite);
+      await reporter.onEnd?.(fakeFullResult({ status: 'passed' }));
+
+      expect(warnCalls).toHaveLength(2);
+    } finally {
+      console.warn = originalWarn;
+    }
   });
 
   test('honors PLAYWRIGHT_RUNBOARD_OUTPUT_DIR when no outputFolder option is provided', async () => {
@@ -219,6 +368,113 @@ test.describe('RunboardReporter — Producer Contract', () => {
       skipped: 0,
       ok: true,
     });
+  });
+
+  test('clears stale files inside the resolved Output Folder before writing the current run', async () => {
+    const stalePath = join(outputFolder, 'stale.json');
+    await writeFile(stalePath, '"stale"', 'utf8');
+
+    const reporter = new RunboardReporter({ outputFolder });
+    const run = fakeRun({ rootDir: '/repo' });
+
+    reporter.onBegin?.(run.config, run.rootSuite);
+    await reporter.onEnd?.(fakeFullResult({ status: 'passed' }));
+
+    await expect(readFile(stalePath, 'utf8')).rejects.toThrow();
+    await expect(readFile(join(outputFolder, 'report.json'), 'utf8')).resolves.toBeDefined();
+  });
+
+  test('refuses to clear when Output Folder equals config.rootDir', async () => {
+    const fixture = await mkdtemp(join(tmpdir(), 'guard-rootdir-'));
+    try {
+      const reporter = new RunboardReporter({ outputFolder: fixture });
+      const run = fakeRun({ rootDir: fixture });
+
+      expect(() => reporter.onBegin?.(run.config, run.rootSuite)).toThrow(/refuses to clear/);
+
+      const stillThere = await stat(fixture);
+      expect(stillThere.isDirectory()).toBe(true);
+    } finally {
+      await rm(fixture, { recursive: true, force: true });
+    }
+  });
+
+  test('refuses to clear when Output Folder equals dirname(config.configFile)', async () => {
+    const configDir = await mkdtemp(join(tmpdir(), 'guard-configdir-'));
+    const rootDir = await mkdtemp(join(tmpdir(), 'guard-rootdir-'));
+    try {
+      const configFile = join(configDir, 'playwright.config.ts');
+      await writeFile(configFile, 'export default {};', 'utf8');
+      const reporter = new RunboardReporter({ outputFolder: configDir });
+      const run = fakeRun({ rootDir, configFile });
+
+      expect(() => reporter.onBegin?.(run.config, run.rootSuite)).toThrow(/refuses to clear/);
+    } finally {
+      await rm(configDir, { recursive: true, force: true });
+      await rm(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  test('refuses to clear when Output Folder equals a project testDir', async () => {
+    const fixture = await mkdtemp(join(tmpdir(), 'guard-testdir-'));
+    const projectTestDir = join(fixture, 'tests');
+    try {
+      const reporter = new RunboardReporter({ outputFolder: projectTestDir });
+      const run = fakeRun({
+        rootDir: fixture,
+        projects: [{ name: 'chromium', testDir: projectTestDir, outputDir: join(fixture, 'out') }],
+      });
+
+      expect(() => reporter.onBegin?.(run.config, run.rootSuite)).toThrow(/refuses to clear/);
+    } finally {
+      await rm(fixture, { recursive: true, force: true });
+    }
+  });
+
+  test('refuses to clear when Output Folder equals a project outputDir', async () => {
+    const fixture = await mkdtemp(join(tmpdir(), 'guard-outputdir-'));
+    const projectOutputDir = join(fixture, 'project-output');
+    try {
+      const reporter = new RunboardReporter({ outputFolder: projectOutputDir });
+      const run = fakeRun({
+        rootDir: fixture,
+        projects: [{ name: 'chromium', testDir: fixture, outputDir: projectOutputDir }],
+      });
+
+      expect(() => reporter.onBegin?.(run.config, run.rootSuite)).toThrow(/refuses to clear/);
+    } finally {
+      await rm(fixture, { recursive: true, force: true });
+    }
+  });
+
+  test('warns when Output Folder is nested inside a project outputDir', async () => {
+    const fixture = await mkdtemp(join(tmpdir(), 'overlap-outputdir-'));
+    const projectOutputDir = join(fixture, 'test-results');
+    const nested = join(projectOutputDir, 'runboard');
+    const warnCalls: unknown[][] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warnCalls.push(args);
+    };
+    try {
+      const reporter = new RunboardReporter({ outputFolder: nested });
+      const run = fakeRun({
+        rootDir: fixture,
+        projects: [{ name: 'chromium', testDir: fixture, outputDir: projectOutputDir }],
+      });
+
+      reporter.onBegin?.(run.config, run.rootSuite);
+      await reporter.onEnd?.(fakeFullResult({ status: 'passed' }));
+
+      const overlapWarnings = warnCalls
+        .map((args) => String(args[0]))
+        .filter((m) => m.includes('overlap'));
+      expect(overlapWarnings.length).toBeGreaterThan(0);
+      expect(overlapWarnings[0]).toMatch(/^playwright-runboard-reporter:/);
+    } finally {
+      console.warn = originalWarn;
+      await rm(fixture, { recursive: true, force: true });
+    }
   });
 
   test('options.outputFolder wins over PLAYWRIGHT_RUNBOARD_OUTPUT_DIR', async () => {
