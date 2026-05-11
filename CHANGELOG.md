@@ -20,6 +20,18 @@ semantics independently of the package version.
 
 ### Added
 
+- Pre-NPM Release flow: `npm run release:artifact` builds the package and
+  runs `npm pack` to produce the versioned tarball that ships as the
+  Release Artifact, and a new `.github/workflows/release-artifact.yml`
+  workflow runs the same script from a `vX.Y.Z` Release Tag push to create
+  a GitHub Release with the tarball attached. `npm run release-gate`
+  continues to gate the artifact build as the strict pre-release quality
+  gate.
+- Accidental-npm-publish guardrail: `package.json` `prepublishOnly` runs
+  `scripts/forbid-npm-publish.mjs`, which aborts `npm publish` with a
+  descriptive message and points maintainers at the Pre-NPM Release flow.
+  A repository invariant test asserts that no workflow file invokes
+  `npm publish` while npm publishing is deferred.
 - Public-package trust signals: MIT `LICENSE`, manually maintained
   `CHANGELOG.md`, `CONTRIBUTING.md`, and `SECURITY.md`.
 - Explicit Public Pack Boundary: the packed npm tarball publishes the built
