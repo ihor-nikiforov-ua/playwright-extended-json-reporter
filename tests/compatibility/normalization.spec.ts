@@ -1,7 +1,7 @@
 /**
  * Compatibility Fixture normalization tests.
  *
- * The data-contract PRD limits compatibility normalization to a small,
+ * Compatibility normalization is limited to a small,
  * explicitly enumerated allowlist:
  *   - path roots (absolute → relative POSIX),
  *   - timestamps and durations (run-to-run noise),

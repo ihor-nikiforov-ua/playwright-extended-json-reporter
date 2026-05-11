@@ -21,10 +21,7 @@
   },
   "files": [
     "dist",
-    "docs/public",
-    "README.md",
-    "LICENSE",
-    "CHANGELOG.md"
+    "README.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -37,8 +34,6 @@
     "pack:verify": "npm run build && npm pack --dry-run --ignore-scripts",
     "prepare": "lefthook install",
     "prepack": "npm run build",
-    "prepublishOnly": "node scripts/forbid-npm-publish.mjs",
-    "release:artifact": "npm run build && npm pack --ignore-scripts",
     "release-gate": "npm run verify && npm run test:catalog -- --fail-on-flaky-tests",
     "test": "playwright test",
     "test:catalog": "playwright test --config=playwright.catalog.config.ts",

@@ -6,7 +6,7 @@ This repo uses `AGENTS.md` as the canonical instruction file for coding agents.
 
 ### Planning and issue tracker
 
-The canonical in-repo data-contract PRD lives at `docs/prd/runboard-reporter-data-contract.md`. Issues are tracked in GitHub Issues for `ihor-nikiforov-ua/playwright-runboard-reporter`. See `docs/agents/issue-tracker.md`.
+Issues are tracked in GitHub Issues for `ihor-nikiforov-ua/playwright-runboard-reporter`. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

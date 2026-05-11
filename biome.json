@@ -7,7 +7,7 @@
     "defaultBranch": "main"
   },
   "files": {
-    "includes": ["**", "!!**/dist", "!docs/public/examples/playwright-runboard-report"]
+    "includes": ["**", "!!**/dist"]
   },
   "formatter": {
     "enabled": true,
