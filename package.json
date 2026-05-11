@@ -30,6 +30,7 @@
     "check:write": "biome check --write .",
     "format": "biome format --write .",
     "invariants": "node scripts/check-invariants.mjs",
+    "install:browsers": "playwright install --with-deps chromium",
     "lint": "eslint .",
     "pack:verify": "npm run build && npm pack --dry-run --ignore-scripts",
     "prepare": "lefthook install",

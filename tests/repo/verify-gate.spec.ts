@@ -57,6 +57,10 @@ test.describe('Canonical verify gate', () => {
   test('CI workflow runs `npm run verify` and does not duplicate gate steps inline', async () => {
     const ciYml = await readFile(resolve(repoRoot, '.github/workflows/ci.yml'), 'utf8');
     expect(ciYml, 'CI must invoke the canonical verify gate').toContain('npm run verify');
+    expect(
+      ciYml,
+      'CI must not install browsers because the default verify gate excludes browser-backed catalog fixtures',
+    ).not.toContain('npm run install:browsers');
     for (const inlineGate of [
       'npm run check',
       'npm run lint',

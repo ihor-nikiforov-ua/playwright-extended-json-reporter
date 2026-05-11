@@ -40,6 +40,17 @@ test.describe('Error Catalog Suite split from Compatibility Smoke Suite', () => 
     ).toContain('playwright.catalog.config.ts');
   });
 
+  test('package.json exposes an explicit Chromium install script for browser-backed gates', async () => {
+    const pkg = await readPackageJson();
+    const script = pkg.scripts?.['install:browsers'] ?? '';
+    expect(script, 'package.json must define an explicit browser install script').toBeTruthy();
+    expect(script, 'browser install must be limited to Chromium').toContain('chromium');
+    expect(
+      pkg.scripts?.['postinstall'],
+      'browser downloads must stay out of package postinstall so consumer installs do not fetch browsers',
+    ).toBeUndefined();
+  });
+
   test('the canonical verify gate keeps the catalog suite out of normal CI', async () => {
     const pkg = await readPackageJson();
     const verify = pkg.scripts?.['verify'] ?? '';
@@ -62,6 +73,10 @@ test.describe('Error Catalog Suite split from Compatibility Smoke Suite', () => 
       workflow,
       'error-catalog workflow must install Node from .nvmrc to match the canonical CI workflow',
     ).toContain('node-version-file: .nvmrc');
+    expect(
+      workflow,
+      'error-catalog workflow must install Chromium before running browser-backed catalog fixtures',
+    ).toContain('npm run install:browsers');
   });
 
   test('normal CI workflow does not invoke the catalog suite', async () => {
