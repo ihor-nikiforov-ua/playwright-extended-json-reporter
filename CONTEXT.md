@@ -12,57 +12,9 @@ _Avoid_: Custom JSON reporter
 The npm package named `playwright-runboard-reporter`, exporting `RunboardReporter` as the default reporter implementation.
 _Avoid_: Generic JSON reporter package
 
-**Public Package Surface**:
-The consumer-facing API, documentation, release metadata, and support promises of the Runboard Reporter Package.
-_Avoid_: Internal implementation details, producer experiment
-
-**Public Documentation Set**:
-The consumer-facing README and focused docs pages that explain how to install, configure, consume, and release the Runboard Reporter Package.
-_Avoid_: PRD collection, ADR index, internal planning docs
-
-**Primary Documentation Audience**:
-Human or AI-agent Playwright users evaluating or installing the Runboard Reporter Package before they care about Runboard internals.
-_Avoid_: Maintainer-first docs, contract-first landing page
-
-**Agent-Readable Documentation**:
-Public documentation written with stable headings, canonical terms, explicit defaults, runnable commands, and checked examples so humans and AI agents can apply it without inferring hidden context.
-_Avoid_: Narrative-only docs, implicit setup, stale snippets
-
-**Public API Documentation**:
-The TSDoc and generated declaration/reference text for every public export and public contract field in the Runboard Reporter Package.
-_Avoid_: Incidental code comments, undocumented declaration surface
-
-**Public API Reference Page**:
-The `docs/public/api.md` page that introduces the public exports and links them to the Runboard Data Contract types.
-_Avoid_: Generated declarations only, stale manual export list
-
-**Public Data Contract Page**:
-The `docs/public/data-contract.md` page that explains output layout, JSON entries, Runboard extensions, schema versioning, and migration notes.
-_Avoid_: PRD link as consumer docs, split schema page too early
-
-**TypeScript Declaration Compatibility**:
-The guarantee that the published `.d.ts` files can be consumed by documented TypeScript compiler versions.
-_Avoid_: TypeScript source publishing, undocumented editor support
-
-**Support Matrix Policy**:
-The public support rule that documents Node, Playwright, and TypeScript compatibility through current baselines plus latest-version checks rather than broad historical matrices.
-_Avoid_: Untested support promise, exhaustive old-version lab
-
-**Public Example Bundle**:
-A small checked example of Runboard Reporter input and emitted Runboard Data Bundle output used to show the real JSON contract.
-_Avoid_: Schematic-only output, unverified sample JSON
-
-**Contract Stability Matrix**:
-A public documentation table that separates stable public promises, schema-versioned JSON fields, preview areas, and non-contract internals.
-_Avoid_: Undifferentiated API promise, implicit stability claim
-
 **HTML Report Data**:
 The data model consumed by Playwright's official HTML report UI, including run summary, per-file test details, retry results, steps, formatted errors, attachments, stdout, stderr, traces, screenshots, and run metadata.
 _Avoid_: Plain JSON summary, report dump
-
-**Playwright HTML Report Data Bundle**:
-A Runboard Data Bundle whose JSON entries follow Playwright HTML Report Data semantics without containing rendered HTML.
-_Avoid_: HTML-shaped data, rendered HTML bundle
 
 **Runboard Data Contract**:
 The stable data-bundle output shape produced by the Runboard Reporter and consumed by the Runboard; it does not include a rendered HTML report.
@@ -95,34 +47,6 @@ _Avoid_: Magic schema string, duplicated schema version
 **Reporter Version**:
 The Runboard Reporter package version that identifies which reporter build produced a Runboard Data Bundle.
 _Avoid_: Schema version, Playwright version
-
-**Public Preview Release**:
-A published `0.x` Runboard Reporter Package release with production-grade documentation, changelog, tags, and publish checks, before declaring the package API and ecosystem `1.0` stable.
-_Avoid_: Throwaway prerelease, internal snapshot
-
-**Package Trust Signal**:
-A public-facing repository or npm-package file such as `LICENSE`, `CHANGELOG.md`, `CONTRIBUTING.md`, or `SECURITY.md` that helps consumers understand legal, release, contribution, and vulnerability-handling expectations.
-_Avoid_: Internal project configuration, fixture docs
-
-**Changelog**:
-A manually maintained `CHANGELOG.md` that explains each Runboard Reporter Package release in consumer-facing terms.
-_Avoid_: Git log, generated commit dump
-
-**Release PR**:
-A pull request that updates package version metadata and changelog content before a Runboard Reporter Package release is tagged.
-_Avoid_: Local version bump, unreviewed publish commit
-
-**Release Tag**:
-A `vX.Y.Z` git tag that starts the authoritative publish workflow for a Runboard Reporter Package version.
-_Avoid_: GitHub release as publish trigger, untagged npm publish
-
-**Pre-NPM Release**:
-A versioned GitHub release and package artifact flow that proves the Runboard Reporter Package is publish-ready without uploading it to the npm registry.
-_Avoid_: npm publish, unversioned dry run
-
-**Release Artifact**:
-The `npm pack` tarball attached to a Pre-NPM Release so maintainers can inspect the package that would later be published to npm.
-_Avoid_: Source archive only, unchecked build output
 
 **Runboard Extension**:
 A Runboard Data Contract field that is not part of Playwright's HTML Report Data and must live under a clearly named Runboard-specific object.
@@ -260,45 +184,12 @@ _Avoid_: Research range, untested historical support
 The release-grade expectation that the Runboard Reporter proves producer correctness for every claimed Runboard Data Bundle behavior at a level comparable to Playwright's official HTML reporter.
 _Avoid_: Full HTML reporter feature parity, report-serving parity, UI parity
 
-**Public Package Quality Target**:
-The expectation that the Runboard Reporter Package feels trustworthy before source inspection through strong README guidance, public API documentation, release discipline, changelog, support policy, and package trust signals.
-_Avoid_: Documentation polish, marketing copy, internal-only readiness
-
 ## Relationships
 
 - The **Runboard Reporter** emits a **Runboard Data Bundle** for one Playwright test run.
 - The **Runboard Reporter Package** is named `playwright-runboard-reporter` and exports `RunboardReporter`.
-- The **Runboard Reporter Package** is Runboard-first while remaining friendly to advanced consumers who read the documented **Runboard Data Contract** directly.
-- The **Public Package Surface** is part of the **Runboard Reporter Package** product, not post-implementation polish.
-- The **Public Documentation Set** belongs to the **Public Package Surface**; PRDs and ADRs remain maintainer context.
-- The **Public Documentation Set** optimizes first for the **Primary Documentation Audience**, then for Runboard integrators and maintainers.
-- The **Public Documentation Set** should be **Agent-Readable Documentation**, not only prose for human browsing.
-- The **Public Documentation Set** is the single source for human and AI-agent package consumers; separate consumer-agent docs should not exist until one shared source stops working.
-- The **Public Documentation Set** should include explicit "not included" boundaries for rendering, serving, previous-run storage, and reporter-side error classification.
-- Public docs should describe Display Error parity as covered by a maintained Playwright error catalog without treating the current catalog count as a permanent public promise.
-- Public docs examples and public docs tables that can drift should be validated by CI where practical.
-- Public README badges should be limited to meaningful maintenance signals such as CI, license, Node support, Playwright support, and npm version once npm publishing exists.
-- **Public API Documentation** belongs to the **Public Package Surface** and must cover every public export and public contract field.
-- The **Public API Reference Page** belongs to the **Public Documentation Set** and should be checked against the package's public exports.
-- The **Public Data Contract Page** owns schema versioning and migration notes until those concerns grow large enough to split.
-- **TypeScript Declaration Compatibility** belongs to the **Public Package Surface** because the package publishes declarations rather than TypeScript source.
-- The **Support Matrix Policy** documents supported Node, Playwright, and TypeScript versions without requiring exhaustive historical compatibility testing.
-- The **Public Documentation Set** should include a validated **Public Example Bundle** rather than relying only on schematic folder diagrams.
-- **Package Trust Signals** belong to the **Public Package Surface** and should include an MIT `LICENSE` file before the first public release.
-- The **Changelog** is a manually maintained **Package Trust Signal** for **Public Preview Releases**.
-- Published package contents should include `dist/`, `docs/public/`, `README.md`, `LICENSE`, and `CHANGELOG.md` while excluding PRDs, ADRs, tests, fixtures, repository governance docs, and repository configuration.
-- Repository governance docs such as `CONTRIBUTING.md` and `SECURITY.md` should live in the repository and be linked from `README.md`, but should not ship in the npm package initially.
-- The **Public Documentation Set** should include a **Contract Stability Matrix** so humans and AI agents know which surfaces are safe to depend on.
-- The **Public Package Quality Target** applies to **Public Preview Releases** even before the broader Runboard ecosystem reaches `1.0`.
-- The **Public Package Quality Target** should be specified in a dedicated PRD before changes are made across README, public docs, API documentation, package metadata, and release automation.
-- The dedicated public-package PRD should define requirements and acceptance criteria, while task breakdown belongs in separate implementation issues or plans.
-- The **Runboard Reporter Package** should ship **Public Preview Releases** while the package is public but the broader Runboard ecosystem is not yet `1.0` stable.
-- A **Public Preview Release** starts as a **Pre-NPM Release** prepared by a **Release PR** and produced from a **Release Tag** after release gates pass.
-- A **Pre-NPM Release** should attach a **Release Artifact** built with `npm pack`.
-- Publishing to npm is deferred until a separate npm publishing decision resolves account ownership, package-name reservation, authentication, and provenance/trusted-publishing setup.
 - The GitHub repository has been renamed to match the **Runboard Reporter Package**.
 - The **HTML Report Data Parity Rule** governs the Runboard Reporter's data-shape target.
-- Public docs may describe the output as a **Playwright HTML Report Data Bundle** when comparing it to Playwright's built-in reporters.
 - The **Runboard Reporter Quality Target** applies to the Runboard Reporter's producer behavior, not to rendered HTML, static assets, report serving, automatic opening, or Playwright JSON reporter output.
 - The **Runboard Reporter Quality Target** requires **Display Error** parity as a first-class producer behavior, not merely preservation of **Structured Error Evidence**.
 - A release-grade Runboard Reporter must prove **Display Error** parity across every **Error Type** in the **Error Catalog**, not only representative formatter families.
@@ -364,7 +255,6 @@ _Avoid_: Documentation polish, marketing copy, internal-only readiness
 - The **Display Error Formatter** must be implemented from public Playwright reporter API data by default; Playwright's official HTML reporter remains the test oracle, not a runtime dependency.
 - A **Compatibility Adapter** may fill specific gaps when public Playwright reporter API data is insufficient, including Playwright's merged-report machine metadata hooks needed to match the HTML reporter.
 - The **Compatibility Rule** governs Runboard Reporter design decisions when the **HTML Report Data Parity Rule** cannot be followed exactly.
-- The in-repo PRD is canonical for the Runboard Reporter data-contract plan; GitHub Issues are canonical for implementation tracking and may link or mirror planning content.
 - Broad quality milestones may be tracked as epics, but each **Implementation Issue** should be one-session sized and independently verifiable.
 - The canonical Display Error parity milestone lives at `docs/prd/display-error-parity.md`.
 - The Error Catalog Display Error parity comparator lives at `tests/harness/compatibility-fixture.ts` (`compareCatalogDisplayErrors` and `formatCatalogDisplayErrorDifferences`); the parametrized parity suite at `tests/error-catalog/display-error-parity.spec.ts` runs catalog fixtures through both reporters and tracks not-yet-at-parity rows with an `EXPECTED_PARITY_FAILURES` allowlist that follow-up Display Error implementation issues drain.
@@ -386,6 +276,5 @@ _Avoid_: Documentation polish, marketing copy, internal-only readiness
 - "use Playwright internals for error formatting" is too broad for a published package. Resolved: **Display Error Formatter** is repo-owned and public-API-based by default; runtime private internals require a separate explicit decision.
 - "`report.machines[]`" can mean a merged-report-only concept or an always-present serialized field. Resolved: the field is always present; merged runs are the case where it contains machine metadata.
 - "dangerous directory" for **Output Folder** cleanup means an exact resolved-path match, not any parent/child overlap.
-- "canonical PRD" means `docs/prd/runboard-reporter-data-contract.md` for the data-contract plan; GitHub Issues are the implementation tracker.
 - The pasted catalog says "30 distinct error types" but enumerates 45. Resolved: the **Error Catalog** has 45 **Error Types**; the "30" wording is stale.
 - "same level of software quality as Playwright's official HTML reporter" means the **Runboard Reporter Quality Target**, not full Playwright HTML reporter feature parity or Playwright JSON reporter compatibility.

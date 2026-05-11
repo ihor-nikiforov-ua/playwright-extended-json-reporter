@@ -120,6 +120,14 @@ test.describe('Release-gate GitHub workflow', () => {
     ).toContain('npm run release-gate');
   });
 
+  test('release-gate workflow installs Chromium before browser-backed checks', async () => {
+    const yml = await readTextFile(RELEASE_WORKFLOW_PATH);
+    expect(
+      yml,
+      'release-gate workflow must install Chromium before running verify and the all-45 catalog suite',
+    ).toContain('npm run install:browsers');
+  });
+
   test('release-gate workflow installs Node from .nvmrc to match the canonical CI workflow', async () => {
     const yml = await readTextFile(RELEASE_WORKFLOW_PATH);
     expect(

@@ -33,7 +33,6 @@ export default tseslint.config(
   {
     ignores: [
       'dist/**',
-      'docs/**',
       'node_modules/**',
       'playwright-runboard-report/**',
       'test-results/**',

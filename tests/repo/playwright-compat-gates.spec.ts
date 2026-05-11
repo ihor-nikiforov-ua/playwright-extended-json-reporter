@@ -97,6 +97,14 @@ test.describe('Playwright support-range compatibility gates', () => {
     ).toBeGreaterThanOrEqual(2);
   });
 
+  test('compatibility jobs do not install browsers for the current smoke-only suite', async () => {
+    const yml = await readTextFile(COMPAT_WORKFLOW_PATH);
+    expect(
+      yml,
+      'compatibility workflow must avoid browser downloads until test:compat grows browser-backed fixtures',
+    ).not.toContain('npm run install:browsers');
+  });
+
   test('compatibility workflow keeps normal PRs fast by guarding heavy paths to schedule/dispatch', async () => {
     const yml = await readTextFile(COMPAT_WORKFLOW_PATH);
     expect(

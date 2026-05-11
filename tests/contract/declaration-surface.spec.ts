@@ -1,16 +1,13 @@
 /**
  * Public declaration-surface contract for the published reporter package.
  *
- * Two concerns live in this spec because they share the same build step:
- *
- * - The PRD requires only a *narrow* Compatibility Adapter for Playwright
- *   reporter API gaps. Playwright's `merge-reports` Multiplexer dispatches
- *   `version`, `onReportConfigure`, and `onReportEnd` via optional chaining,
- *   so the reporter must implement them at runtime — but their payload
- *   shapes are Playwright-internal and must not surface in this package's
- *   public type surface.
- * - Every public export must carry a TSDoc block so generated declarations
- *   and editor hovers explain the API without forcing a README lookup.
+ * The PRD requires only a *narrow* Compatibility Adapter for Playwright
+ * reporter API gaps. Playwright's `merge-reports` Multiplexer dispatches
+ * `version`, `onReportConfigure`, and `onReportEnd` via optional chaining,
+ * so the reporter must implement them at runtime — but their payload shapes
+ * are Playwright-internal and must not surface in this package's public
+ * type surface. This spec asserts the generated `dist/runboard-reporter.d.ts`
+ * exposes only the public Playwright Reporter API.
  */
 import { execFileSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
@@ -19,44 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { expect, test } from '@playwright/test';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const distDir = resolve(repoRoot, 'dist');
-const indexDts = resolve(distDir, 'index.d.ts');
-const contractDts = resolve(distDir, 'contract.d.ts');
-const reporterDts = resolve(distDir, 'runboard-reporter.d.ts');
-const optionsDts = resolve(distDir, 'options.d.ts');
-
-const CONTRACT_TYPES = [
-  'RunboardLocation',
-  'RunboardStats',
-  'RunboardMetadata',
-  'RunboardReportOptions',
-  'RunboardMachine',
-  'RunboardTestAnnotation',
-  'RunboardTestAttachment',
-  'RunboardTestStep',
-  'RunboardErrorEvidenceSource',
-  'RunboardSourceExcerpt',
-  'RunboardTestErrorEvidence',
-  'RunboardStatusDerivedErrorEvidence',
-  'RunboardErrorEvidence',
-  'RunboardResultEvidence',
-  'RunboardTestResultDisplayError',
-  'RunboardTestResultStatus',
-  'RunboardTestResult',
-  'RunboardTestResultSummary',
-  'RunboardTestOutcome',
-  'RunboardTestCaseSummary',
-  'RunboardTestCase',
-  'RunboardTestFileSummary',
-  'RunboardTestFile',
-  'RunboardReport',
-] as const;
-
-function tsDocBeforeDeclaration(name: string): RegExp {
-  return new RegExp(
-    `/\\*\\*[\\s\\S]*?\\*/\\s*export(?:\\s+declare)?\\s+(?:const|interface|type|class)\\s+${name}\\b`,
-  );
-}
+const reporterDts = resolve(repoRoot, 'dist', 'runboard-reporter.d.ts');
 
 test.describe('Reporter declaration surface', () => {
   test.beforeAll(() => {
@@ -82,81 +42,15 @@ test.describe('Reporter declaration surface', () => {
     expect(dts).not.toContain('reportPath');
   });
 
-  test('public reporter d.ts exposes both onBegin overloads so the class implements Playwright Reporter', async () => {
+  test('public reporter d.ts exposes only the v2 onBegin(suite) overload', async () => {
     const dts = await readFile(reporterDts, 'utf8');
 
-    // The v2 overload is the preferred call path documented for editor hovers.
-    expect(dts, 'public d.ts must expose the v2 onBegin(suite) overload').toMatch(
+    expect(dts, 'public d.ts must expose the v2 onBegin overload').toMatch(
       /onBegin\s*\(\s*suite\s*:\s*Suite\s*\)\s*:\s*void/,
     );
 
-    // The v1 overload must stay public so the class is structurally assignable
-    // to Playwright's `Reporter.onBegin?(config, suite)` signature. A
-    // consumer-style `tsc` over `dist/runboard-reporter.d.ts` would otherwise
-    // fail with TS2416 because `implements Reporter` requires a matching
-    // overload (see tests/repo/declaration-compatibility.spec.ts).
-    expect(dts, 'public d.ts must expose the v1 onBegin(config, suite) overload').toMatch(
-      /onBegin\s*\(\s*config\s*:\s*FullConfig\s*,\s*suite\s*:\s*Suite\s*\)\s*:\s*void/,
-    );
-
-    // The union implementation signature is still an internal detail and must not leak.
+    // The v1-style 2-arg overload and the union implementation signature must not leak.
     expect(dts).not.toMatch(/onBegin\s*\(\s*configOrSuite\b/);
-  });
-
-  test('RUNBOARD_SCHEMA_VERSION carries TSDoc in the public contract declarations', async () => {
-    const dts = await readFile(contractDts, 'utf8');
-    expect(dts).toMatch(tsDocBeforeDeclaration('RUNBOARD_SCHEMA_VERSION'));
-  });
-
-  test('RunboardReporter class carries TSDoc in the public reporter declarations', async () => {
-    const dts = await readFile(reporterDts, 'utf8');
-    expect(dts).toMatch(tsDocBeforeDeclaration('RunboardReporter'));
-  });
-
-  test('RunboardReporterOptions carries TSDoc in the public options declarations', async () => {
-    const dts = await readFile(optionsDts, 'utf8');
-    expect(dts).toMatch(tsDocBeforeDeclaration('RunboardReporterOptions'));
-  });
-
-  test('every Runboard Contract Type carries a TSDoc block', async () => {
-    const dts = await readFile(contractDts, 'utf8');
-    const undocumented = CONTRACT_TYPES.filter((name) => !tsDocBeforeDeclaration(name).test(dts));
-    expect(
-      undocumented,
-      `Runboard Contract Types must carry TSDoc in dist/contract.d.ts; missing: ${undocumented.join(', ')}`,
-    ).toEqual([]);
-  });
-
-  test('Runboard Metadata fields document the schema-versioning trio', async () => {
-    const dts = await readFile(contractDts, 'utf8');
-    const metadataMatch = dts.match(/interface RunboardMetadata\b[\s\S]*?\}/);
-    expect(metadataMatch, 'RunboardMetadata must be present in contract.d.ts').not.toBeNull();
-    const body = metadataMatch?.[0] ?? '';
-    for (const field of ['schemaVersion', 'reporterVersion', 'playwrightVersion']) {
-      expect(
-        body,
-        `RunboardMetadata.${field} must carry inline TSDoc explaining its semantic`,
-      ).toMatch(new RegExp(`/\\*\\*[\\s\\S]*?\\*/\\s*${field}\\s*:`));
-    }
-  });
-
-  test('RunboardReportOptions fields document Playwright-applicable display options', async () => {
-    const dts = await readFile(contractDts, 'utf8');
-    const optionsMatch = dts.match(/interface RunboardReportOptions\b[\s\S]*?\}/);
-    expect(optionsMatch, 'RunboardReportOptions must be present in contract.d.ts').not.toBeNull();
-    const body = optionsMatch?.[0] ?? '';
-    for (const field of ['title', 'noCopyPrompt', 'noSnippets']) {
-      expect(
-        body,
-        `RunboardReportOptions.${field} must carry inline TSDoc explaining its semantic`,
-      ).toMatch(new RegExp(`/\\*\\*[\\s\\S]*?\\*/\\s*${field}\\?:`));
-    }
-  });
-
-  test('public index.d.ts still re-exports the documented schema constant and reporter symbols', async () => {
-    const dts = await readFile(indexDts, 'utf8');
-    expect(dts).toContain('RUNBOARD_SCHEMA_VERSION');
-    expect(dts).toContain('RunboardReporter');
-    expect(dts).toContain('RunboardReporterOptions');
+    expect(dts).not.toMatch(/onBegin\s*\(\s*config\s*:\s*FullConfig\s*,/);
   });
 });

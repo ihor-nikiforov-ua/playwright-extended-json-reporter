@@ -4,7 +4,7 @@
 
 The Runboard Reporter package needs stronger, explicit code quality gates before implementation expands beyond the current small codebase. The package exists to produce a stable Runboard Data Bundle that follows Playwright HTML Report Data semantics, so accidental drift in TypeScript strictness, package metadata, private Playwright imports, async file-writing behavior, or published package contents can break consumers even when ordinary tests still pass.
 
-The current setup already has useful foundations: strict TypeScript, Biome formatting and linting, Playwright tests, package verification, and CI. However, those checks do not yet define a single shippability contract for the Runboard Reporter Package, and they do not enforce several project-specific rules required by the existing data-contract plan, such as the Playwright Support Range, public Playwright reporter API preference, compatibility-adapter boundaries, and published package boundary.
+The current setup already has useful foundations: strict TypeScript, Biome formatting and linting, Playwright tests, package verification, and CI. However, those checks do not yet define a single shippability contract for the Runboard Reporter Package, and they do not enforce several project-specific rules such as the Playwright Support Range, public Playwright reporter API preference, compatibility-adapter boundaries, and published package boundary.
 
 ## Solution
 
@@ -148,7 +148,7 @@ The quality gates should be pragmatic rather than broad. They should protect pac
 
 ## Further Notes
 
-The existing data-contract PRD remains canonical for Runboard Data Contract shape and Playwright HTML Report Data parity requirements. This PRD defines the package quality gates needed to keep implementation aligned with those requirements as the Runboard Reporter Package grows.
+The Runboard Data Contract implementation and compatibility tests remain canonical for Runboard Data Contract shape and Playwright HTML Report Data parity requirements. This PRD defines the package quality gates needed to keep implementation aligned with those requirements as the Runboard Reporter Package grows.
 
 The local Playwright repository remains useful as a reference for official HTML reporter behavior and for examples of strict TypeScript and ESLint rules. Its monorepo and UI-specific configuration should be treated as reference material, not as a direct template for this reporter-only package.
 

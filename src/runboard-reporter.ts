@@ -91,8 +91,7 @@ interface MergeReportEndParams {
  * ```
  *
  * Rendering, serving, or opening HTML, Previous Run storage, and reporter-
- * side Error Classification are intentionally out of scope; see the
- * Public Documentation Set under `docs/public/` for the full boundary list.
+ * side Error Classification are intentionally out of scope.
  */
 export class RunboardReporter implements Reporter {
   private readonly outputFolder: string;
@@ -168,15 +167,14 @@ export class RunboardReporter implements Reporter {
     this.pendingConfig = config;
   }
 
-  // Public Playwright Reporter v2 onBegin — Playwright's v2 Multiplexer
-  // dispatches this overload after `onConfigure`.
+  // Public Playwright Reporter v2 onBegin — this is the only overload that
+  // surfaces in `dist/runboard-reporter.d.ts`.
   onBegin(suite: Suite): void;
-  // v1-style overload preserved so the class is structurally assignable to
-  // Playwright's public `Reporter.onBegin?(config, suite)` signature and so
-  // `ReporterV2Wrapper`-wrapped dispatch keeps working. Both arguments use
-  // public Playwright reporter types, so this overload is part of the public
-  // declaration surface even though the v2 overload is the preferred call
-  // path.
+  // v1-style overload kept as a Compatibility Adapter for `ReporterV2Wrapper`
+  // dispatch and for unit tests that pass `(config, suite)` directly. Marked
+  // `@internal` so `stripInternal` excludes it from the public declaration
+  // surface; the runtime behavior is preserved by the implementation below.
+  /** @internal */
   onBegin(config: FullConfig, suite: Suite): void;
   onBegin(configOrSuite: FullConfig | Suite, maybeSuite?: Suite): void {
     let config: FullConfig;

@@ -4,7 +4,7 @@
  * Runs a deliberately small Playwright fixture once with the Runboard Reporter
  * and once with Playwright's official HTML reporter, extracts comparable data
  * from both bundles, and reports any contract-path mismatch outside the
- * normalization allowlist defined in the data-contract PRD.
+ * normalization allowlist.
  *
  * The harness is the only place the test suite is allowed to read Playwright's
  * private HTML report bundle layout: the `index.html` template embeds report
@@ -808,14 +808,6 @@ export interface RunMergeReportsFixtureOptions {
    * HTML reporter wired into the merge config.
    */
   shards: Array<{ tags?: string[] }>;
-  /**
-   * Override for the `cwd` and `node_modules/.bin/playwright` lookup used when
-   * invoking the Playwright CLI. Defaults to `dirname(reporterDist)/..`.
-   * Callers separate this from `reporterDist` when the reporter file lives in
-   * an isolated snapshot directory but the Playwright binary still has to be
-   * resolved against the repo's installed `node_modules`.
-   */
-  pkgRoot?: string;
 }
 
 export async function runMergeReportsCompatibilityFixture(
@@ -838,7 +830,7 @@ export async function runMergeReportsCompatibilityFixture(
     await writeFile(target, body, 'utf8');
   }
 
-  const pkgRoot = options.pkgRoot ?? resolve(dirname(reporterDist), '..');
+  const pkgRoot = resolve(dirname(reporterDist), '..');
   const playwrightBin = join(pkgRoot, 'node_modules', '.bin', 'playwright');
 
   const childEnv: NodeJS.ProcessEnv = { ...process.env, FORCE_COLOR: '0' };
