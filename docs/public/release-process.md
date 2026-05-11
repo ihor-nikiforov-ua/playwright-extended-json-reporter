@@ -25,7 +25,9 @@ ecosystem is pre-`1.0`. During this posture:
 
 ## Release PR
 
-A Release PR is the unit of release review. It:
+A Release PR is the unit of release review. It updates exactly the files
+required to cut a Pre-NPM Release; no other content changes ship in the
+same PR.
 
 1. Bumps `package.json` `version` to the target `0.Y.Z` value.
 2. Renames the `## [Unreleased]` heading in `CHANGELOG.md` to
@@ -56,7 +58,7 @@ relationship between code and release artifacts strictly source-controlled.
 ## Pre-NPM Release
 
 While npm publishing is deferred, every release ships as a Pre-NPM Release:
-a versioned GitHub release built from the Release Tag, with the `npm pack`
+a versioned GitHub Release built from the Release Tag, with the `npm pack`
 tarball attached as the Release Artifact. The Release Artifact carries
 exactly the files documented under [API Reference](./api.md) and
 [Data Contract](./data-contract.md) — `dist/`, `docs/public/`, `README.md`,
@@ -65,6 +67,58 @@ exactly the files documented under [API Reference](./api.md) and
 Pre-NPM Releases prove the package is publish-ready without uploading it to
 the npm registry. Consumers can install the artifact directly from the
 GitHub Release for evaluation.
+
+### Release Artifact build
+
+The Release Artifact is produced by the canonical
+`npm run release:artifact` script:
+
+```sh
+npm run release:artifact
+```
+
+The script builds the package and then runs `npm pack` to write a real
+`playwright-runboard-reporter-0.Y.Z.tgz` file in the repository root. It
+intentionally does **not** pass `--dry-run` (that path is reserved for
+`npm run pack:verify` inside the canonical verify gate) and never calls
+`npm publish`.
+
+### Release Artifact workflow
+
+The [`release-artifact.yml`](../../.github/workflows/release-artifact.yml)
+GitHub Actions workflow runs the same script in CI when a `vX.Y.Z` Release
+Tag is pushed:
+
+1. Checks out the tagged commit.
+2. Installs Node from `.nvmrc` and runs `npm ci`.
+3. Runs `npm run release-gate` so a Pre-NPM Release inherits the strict
+   pre-release quality gate (the canonical verify gate plus the all-45
+   Error Catalog Display Error parity suite).
+4. Runs `npm run release:artifact` to produce the packed tarball.
+5. Calls `gh release create` to create a GitHub Release for the Release
+   Tag and attaches the `.tgz` Release Artifact.
+
+The workflow is also runnable on demand through `workflow_dispatch` so
+maintainers can re-run an artifact build after fixing a release workflow
+regression. The release gate workflow at
+[`release-gate.yml`](../../.github/workflows/release-gate.yml) continues to
+run on `release.published` events as the strict pre-release quality gate.
+
+## Guardrails against accidental npm publishing
+
+`npm publish` must not run while npm publishing is deferred. Two
+guardrails enforce this:
+
+- `package.json` defines a `prepublishOnly` script that runs
+  [`scripts/forbid-npm-publish.mjs`](../../scripts/forbid-npm-publish.mjs).
+  Any `npm publish` invocation — local or workflow — aborts with a
+  descriptive error pointing maintainers at the Pre-NPM Release flow.
+- The `release-artifact.yml` workflow never invokes `npm publish`, and a
+  repository invariant test asserts that no workflow file references it.
+
+To produce a Release Artifact without publishing, use
+`npm run release:artifact` locally or push a `vX.Y.Z` Release Tag to
+trigger the workflow.
 
 ## npm publishing (deferred)
 
@@ -81,4 +135,5 @@ The remaining preconditions are tracked separately:
   Releases without breaking installed Release Artifacts.
 
 When those decisions land, a follow-up update to this page documents how a
-Release Tag drives an npm publish in addition to the GitHub Release.
+Release Tag drives an npm publish in addition to the GitHub Release. Until
+then, the `prepublishOnly` guardrail keeps `npm publish` blocked.
