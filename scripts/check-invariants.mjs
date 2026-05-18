@@ -173,6 +173,7 @@ async function checkCiUsesNvmrc(repoRoot) {
 
 const EXPECTED_EXPORT_TYPES = './dist/index.d.ts';
 const EXPECTED_EXPORT_IMPORT = './dist/index.js';
+const EXPECTED_EXPORT_DEFAULT = './dist/index.js';
 const EXPECTED_FILES_ALLOWLIST = ['dist', 'README.md'];
 const REQUIRED_GITIGNORE_PATTERNS = [
   'node_modules/',
@@ -195,24 +196,29 @@ async function checkPackageExportsSingleEntrypoint(repoRoot) {
   const onlyDot = keys.length === 1 && keys[0] === '.';
   const dotEntry = /** @type {Record<string, unknown> | undefined} */ (exportsField?.['.']);
   const conditions = dotEntry ? Object.keys(dotEntry) : [];
-  const expectedConditions = ['types', 'import'];
+  const expectedConditions = ['types', 'import', 'default'];
   const conditionsMatch =
     conditions.length === expectedConditions.length &&
     expectedConditions.every((c) => conditions.includes(c));
   const typesValue = dotEntry?.['types'];
   const importValue = dotEntry?.['import'];
+  const defaultValue = dotEntry?.['default'];
   const valuesMatch =
-    typesValue === EXPECTED_EXPORT_TYPES && importValue === EXPECTED_EXPORT_IMPORT;
+    typesValue === EXPECTED_EXPORT_TYPES &&
+    importValue === EXPECTED_EXPORT_IMPORT &&
+    defaultValue === EXPECTED_EXPORT_DEFAULT;
   const ok = onlyDot && conditionsMatch && valuesMatch;
   return {
     name: 'package-exports-single-entrypoint',
     ok,
     message: ok
-      ? `package.json exports a single '.' entry mapping types→${EXPECTED_EXPORT_TYPES}, import→${EXPECTED_EXPORT_IMPORT}`
+      ? `package.json exports a single '.' entry mapping types→${EXPECTED_EXPORT_TYPES}, import→${EXPECTED_EXPORT_IMPORT}, default→${EXPECTED_EXPORT_DEFAULT}`
       : `package.json exports must contain exactly { ".": { "types": "${EXPECTED_EXPORT_TYPES}", ` +
-        `"import": "${EXPECTED_EXPORT_IMPORT}" } } so the package keeps a single public entrypoint; ` +
+        `"import": "${EXPECTED_EXPORT_IMPORT}", "default": "${EXPECTED_EXPORT_DEFAULT}" } } ` +
+        `so the package keeps a single public entrypoint with a resolver fallback; ` +
         `found keys=[${keys.join(', ')}], conditions=[${conditions.join(', ')}], ` +
-        `types='${typesValue ?? '<missing>'}', import='${importValue ?? '<missing>'}'`,
+        `types='${typesValue ?? '<missing>'}', import='${importValue ?? '<missing>'}', ` +
+        `default='${defaultValue ?? '<missing>'}'`,
   };
 }
 

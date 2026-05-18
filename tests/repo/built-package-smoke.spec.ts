@@ -16,7 +16,7 @@
 import { execFile } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { expect, test } from '@playwright/test';
@@ -24,6 +24,11 @@ import { expect, test } from '@playwright/test';
 const execFileAsync = promisify(execFile);
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+function toImportSpecifier(fromDir: string, toPath: string): string {
+  const relativePath = relative(fromDir, toPath).split(sep).join('/');
+  return relativePath.startsWith('.') ? relativePath : `./${relativePath}`;
+}
 
 const SMOKE_SCRIPT = `
 import RunboardReporter, {
@@ -55,11 +60,19 @@ if (failures.length > 0) {
 console.log('SMOKE_OK');
 `;
 
-async function buildAndPackTarball(destination: string): Promise<string> {
-  await execFileAsync('npm', ['run', 'build'], { cwd: repoRoot });
+async function buildAndPackTarball(destination: string, npmCacheDir: string): Promise<string> {
+  await execFileAsync('npm', ['--cache', npmCacheDir, 'run', 'build'], { cwd: repoRoot });
   const { stdout } = await execFileAsync(
     'npm',
-    ['pack', '--ignore-scripts', '--silent', '--pack-destination', destination],
+    [
+      '--cache',
+      npmCacheDir,
+      'pack',
+      '--ignore-scripts',
+      '--silent',
+      '--pack-destination',
+      destination,
+    ],
     { cwd: repoRoot },
   );
   const lines = stdout.trim().split('\n');
@@ -67,7 +80,10 @@ async function buildAndPackTarball(destination: string): Promise<string> {
   return resolve(destination, tarballName);
 }
 
-async function installAndImport(tarball: string): Promise<{ stdout: string; stderr: string }> {
+async function installAndImport(
+  tarball: string,
+  npmCacheDir: string,
+): Promise<{ stdout: string; stderr: string }> {
   const consumerDir = await mkdtemp(join(tmpdir(), 'runboard-smoke-consumer-'));
   try {
     await writeFile(
@@ -79,6 +95,13 @@ async function installAndImport(tarball: string): Promise<{ stdout: string; stde
           private: true,
           type: 'module',
           dependencies: {
+            '@babel/code-frame': `file:${resolve(repoRoot, 'node_modules/@babel/code-frame')}`,
+            '@babel/helper-validator-identifier': `file:${resolve(
+              repoRoot,
+              'node_modules/@babel/helper-validator-identifier',
+            )}`,
+            'js-tokens': `file:${resolve(repoRoot, 'node_modules/js-tokens')}`,
+            picocolors: `file:${resolve(repoRoot, 'node_modules/picocolors')}`,
             'playwright-runboard-reporter': `file:${tarball}`,
           },
         },
@@ -89,7 +112,16 @@ async function installAndImport(tarball: string): Promise<{ stdout: string; stde
     await writeFile(join(consumerDir, 'smoke.mjs'), SMOKE_SCRIPT);
     await execFileAsync(
       'npm',
-      ['install', '--no-audit', '--no-fund', '--ignore-scripts', '--no-package-lock'],
+      [
+        '--cache',
+        npmCacheDir,
+        'install',
+        '--no-audit',
+        '--no-fund',
+        '--ignore-scripts',
+        '--no-package-lock',
+        '--legacy-peer-deps',
+      ],
       { cwd: consumerDir },
     );
     return await execFileAsync(process.execPath, [join(consumerDir, 'smoke.mjs')], {
@@ -104,12 +136,50 @@ test.describe('Built package smoke check', () => {
   test('packed tarball installs into a fresh project and exposes the public reporter exports', async () => {
     test.setTimeout(180_000);
     const stagingDir = await mkdtemp(join(tmpdir(), 'runboard-smoke-stage-'));
+    const npmCacheDir = join(stagingDir, 'npm-cache');
     try {
-      const tarball = await buildAndPackTarball(stagingDir);
-      const { stdout } = await installAndImport(tarball);
+      const tarball = await buildAndPackTarball(stagingDir, npmCacheDir);
+      const { stdout } = await installAndImport(tarball, npmCacheDir);
       expect(stdout, stdout).toContain('SMOKE_OK');
     } finally {
       await rm(stagingDir, { recursive: true, force: true });
+    }
+  });
+
+  test('package root resolves from a separate project folder like a Playwright reporter path', async () => {
+    await execFileAsync('npm', ['run', 'build'], { cwd: repoRoot });
+    const consumerDir = await mkdtemp(join(tmpdir(), 'runboard-folder-consumer-'));
+    try {
+      const configPath = join(consumerDir, 'playwright.config.cjs');
+      const smokePath = join(consumerDir, 'folder-smoke.mjs');
+      const reporterSpecifier = toImportSpecifier(consumerDir, repoRoot);
+      await writeFile(configPath, 'module.exports = {};\n');
+      await writeFile(
+        smokePath,
+        `
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
+
+const requireFromConsumerConfig = createRequire(${JSON.stringify(configPath)});
+const resolved = requireFromConsumerConfig.resolve(${JSON.stringify(reporterSpecifier)});
+const mod = await import(pathToFileURL(resolved).href);
+
+if (typeof mod.default !== 'function') {
+  console.error('default export was not a reporter constructor');
+  process.exit(1);
+}
+if (mod.default !== mod.RunboardReporter) {
+  console.error('default and named reporter exports diverged');
+  process.exit(1);
+}
+console.log('FOLDER_SMOKE_OK');
+`,
+        'utf8',
+      );
+      const { stdout } = await execFileAsync(process.execPath, [smokePath], { cwd: consumerDir });
+      expect(stdout, stdout).toContain('FOLDER_SMOKE_OK');
+    } finally {
+      await rm(consumerDir, { recursive: true, force: true });
     }
   });
 
